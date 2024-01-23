@@ -37,7 +37,7 @@ session = tf.Session(config=config)
 from shapely.geometry import box
 from rtree import index
 
-class GRANULO_Georef_FINAL(QgsProcessingAlgorithm):
+class GALET_Georef(QgsProcessingAlgorithm):
     
     #INPUT
     INPUT_RASTER = 'INPUT_RASTER'
@@ -65,22 +65,22 @@ class GRANULO_Georef_FINAL(QgsProcessingAlgorithm):
         super().__init__()
         
     def tr(self, string):
-               return QCoreApplication.translate('GRANULO_Georef_FINAL', string)
+               return QCoreApplication.translate('GALET_Georef', string)
 
     def createInstance(self):
         return type(self)()
 
     def name(self):
-                return 'GRANULO_Georef_FINAL'
+                return 'GALET_Georef'
 
     def displayName(self):
-               return self.tr('GRANULO_Georef_FINAL')
+               return self.tr('GALET_Georef')
 
     def group(self):
-               return self.tr('GRANULO')
+               return self.tr('Galet')
 
     def groupId(self):
-              return 'GRANULO'
+              return 'Galet'
               
     def shortHelpString(self):
         return self.tr(" /!\ Les données (input et output) seront automatiquement reprojeté sur le crs du projet en cours si aucun crs n'est définie.\nSi le crs du projet est invalide il sera automatiquement definie en EPSG 4326")
@@ -91,79 +91,79 @@ class GRANULO_Georef_FINAL(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterRasterLayer(
                 self.INPUT_RASTER,
-                self.tr('Raster à traiter :')))
+                self.tr('Input Raster :')))
                 
         self.addParameter(
             QgsProcessingParameterFile(
                 self.INPUT_WEIGHT,
-                self.tr('Fichier Weight d entrainement (format *.h5):')))
+                self.tr('Weight file (format *.h5):')))
                 
         
         self.addParameter(
             QgsProcessingParameterVectorLayer(
                 self.INPUT_VECTOR,
-                self.tr('Polygone de découpe du Raster')))
+                self.tr('Raster Clipping Polygon')))
         
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.FILTRE_REC_RESULT,
-                self.tr('###########################################\nConfig General:\n###########################################\ntaux de recouvrement pour elimination des grains en double'),
+                self.tr('###########################################\nGeneral Settings:\n###########################################\nOverlap rate for removing duplicate grains'),
                 QgsProcessingParameterNumber.Double,
                 defaultValue =0.7))
                 
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.CUT_RAST,
-                self.tr('longueur de découpe des cases (pixel)'),
+                self.tr('Cut length of the cells (pixels)'),
                 QgsProcessingParameterNumber.Double,
                 defaultValue =512))
                 
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.CUT_SUPERPOS,
-                self.tr('Taux de recouvrement des cases (0 a 1)'),
+                self.tr('Overlap rate of the cells (0 to 1)'),
                 QgsProcessingParameterNumber.Double,
                 defaultValue =0.1))
                 
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.IMAGE_MAX_DIM,
-                self.tr('###########################################\nConfig MRCNN :\n###########################################\nDimension max de l image /!\ multiple de 256 (256, 512, 1024, 4096...)'),
+                self.tr('###########################################\nMRCNN Settings:\n###########################################\nMaximum image dimension /!\ multiple of 256 (256, 512, 1024, 4096...)'),
                 QgsProcessingParameterNumber.Integer,
                 defaultValue =512))
         
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.DETECTION_MAX_INSTANCES,
-                self.tr('Nombre maximum final de détection'),
+                self.tr('Maximum final detection count per cell'),
                 QgsProcessingParameterNumber.Integer,
                 defaultValue=1000))
                 
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.RPN_NMS_THRESHOLD,
-                self.tr('Seuil de suppression (0 à 1) du RPN'),
+                self.tr('Suppression threshold (0 to 1) for RPN'),
                 QgsProcessingParameterNumber.Double,
                 defaultValue=0.7))
                 
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.POST_NMS_ROIS_INFERENCE,
-                self.tr('Nombre de ROI maximum après filtre RPN'),
+                self.tr('Maximum number of ROI after RPN filter'),
                 QgsProcessingParameterNumber.Integer,
                 defaultValue=2000))
                 
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.DETECTION_NMS_THRESHOLD,
-                self.tr('Seuil de suppression (0 à 1) du NMS'),
+                self.tr('Suppression threshold (0 to 1) for NMS'),
                 QgsProcessingParameterNumber.Double,
                 defaultValue=0.3))
                 
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.PRE_NMS_LIMIT,
-                self.tr('ROI maximum avant filtre NMS'),
+                self.tr('Maximum ROI before NMS filter.'),
                 QgsProcessingParameterNumber.Integer,
                 defaultValue=9000))
         
@@ -171,7 +171,7 @@ class GRANULO_Georef_FINAL(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterFeatureSink(
             self.OUTPUT_MASK,
-            self.tr('###########################################\nContour des grains identifié :')))
+            self.tr('###########################################\nContour of identified grains')))
         
              
     def processAlgorithm(self, parameters, context, feedback):

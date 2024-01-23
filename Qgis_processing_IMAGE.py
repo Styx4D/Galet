@@ -1,57 +1,40 @@
 # -*- coding: utf-8 -*-
 
 from qgis.PyQt.QtCore import QCoreApplication
-from qgis.core import (QgsProcessing,
-                       QgsFeatureSink,
-                       Qgis,
-                       QgsProcessingException,
+from qgis.core import (QgsFeatureSink,
                        QgsProcessingAlgorithm,
                        QgsProcessingParameterRasterLayer,
                        QgsProcessingParameterRasterDestination,
                        QgsProcessingParameterNumber,
-                       QgsProcessingParameterFileDestination,
                        QgsProcessingParameterVectorLayer,
                        QgsProcessingParameterFeatureSink,
                        QgsField, QgsFields, QgsFeature,
-                       QgsProcessingParameterVectorDestination,
-                       QgsProcessingFeatureSourceDefinition,
-                       QgsProcessingFeedback,
-                       QgsVectorLayer,
                        QgsRasterLayer,
-                       QgsProcessingParameterEnum,
-                       QgsProject, 
-                       QgsCoordinateReferenceSystem,
                        QgsWkbTypes,
-                       QgsMessageLog,
                        QgsGeometry,
                        QgsProcessingParameterFile,
-                       QgsVectorFileWriter,
                        QgsPointXY)
 from qgis import processing
 
-import codecs, os, tempfile
+import os, tempfile
 import sys
 from qgis.PyQt.QtCore import QVariant
-from qgis.analysis import QgsRasterCalculator, QgsRasterCalculatorEntry
-from osgeo import gdal, osr
+from osgeo import gdal
 import numpy as np
-import cupy as cp
-from qgis.utils import iface
 
-import time
 import rasterio
-from rasterio.features import shapes
 from rasterio import Affine as A
-import geopandas as gp
 import warnings
 warnings.filterwarnings("ignore")
-import cupy as cp
 import tensorflow as tf
+
+from PIL import Image
+
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 session = tf.Session(config=config)
 
-class Granu_Mask(QgsProcessingAlgorithm):
+class GALET_image(QgsProcessingAlgorithm):
     
     #INPUT
     INPUT_RASTER = 'INPUT_RASTER'
@@ -81,22 +64,22 @@ class Granu_Mask(QgsProcessingAlgorithm):
         super().__init__()
         
     def tr(self, string):
-               return QCoreApplication.translate('Granul_mask_rcnn', string)
+               return QCoreApplication.translate('GALET_image', string)
 
     def createInstance(self):
         return type(self)()
 
     def name(self):
-                return 'GRANULO_NON_Georef'
+                return 'GALET_image'
 
     def displayName(self):
-               return self.tr('GRANULO_NON_Georef')
+               return self.tr('GALET_image')
 
     def group(self):
-               return self.tr('GRANULO')
+               return self.tr('Galet')
 
     def groupId(self):
-              return 'GRANULO'
+              return 'Galet'
               
     def shortHelpString(self):
         return self.tr(" /!\ Les données (input et output) seront automatiquement reprojeté sur le crs du projet en cours si aucun crs n'est définie.\nSi le crs du projet est invalide il sera automatiquement definie en EPSG 4326")
@@ -107,85 +90,86 @@ class Granu_Mask(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterRasterLayer(
                 self.INPUT_RASTER,
-                self.tr('Raster à traiter :')))
+                self.tr('Input Image :')))
                 
         self.addParameter(
             QgsProcessingParameterFile(
                 self.INPUT_WEIGHT,
-                self.tr('Fichier Weight d entrainement (format *.h5):')))
+                self.tr('Weight file (format *.h5):')))
                 
         self.addParameter(
             QgsProcessingParameterVectorLayer(
                 self.SCALE_LINE,
-                self.tr('Ligne d échelle :')))
+                self.tr('Scale line:')))
         
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.SCALE_LEN,
-                self.tr('Taille de l échelle'),
+                self.tr('Scale Size (meters)'),
                 QgsProcessingParameterNumber.Double,
                 defaultValue =10))
         
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.FILTRE_REC_RESULT,
-                self.tr('###########################################\nConfig General:\n###########################################\ntaux de recouvrement pour elimination des grains en double'),
+                self.tr('###########################################\nGeneral Settings:\n###########################################\nOverlap rate for removing duplicate grains'),
                 QgsProcessingParameterNumber.Double,
                 defaultValue =0.8))
                 
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.CUT_RAST,
-                self.tr('longueur de découpe des cases (pixel)'),
+                self.tr('Cut length of the cells (pixels)'),
                 QgsProcessingParameterNumber.Double,
                 defaultValue =512))
                 
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.CUT_SUPERPOS,
-                self.tr('Taux de recouvrement des cases (0 a 1)'),
+                self.tr('Overlap rate of the cells (0 to 1)'),
                 QgsProcessingParameterNumber.Double,
                 defaultValue =0.1))
                 
+              
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.IMAGE_MAX_DIM,
-                self.tr('###########################################\nConfig MRCNN :\n###########################################\nDimension max de l image /!\ multiple de 256 (256, 512, 1024, 4096...)'),
+                self.tr('###########################################\nMRCNN Settings:\n###########################################\nMaximum image dimension /!\ multiple of 256 (256, 512, 1024, 4096...)'),
                 QgsProcessingParameterNumber.Integer,
                 defaultValue =512))
         
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.DETECTION_MAX_INSTANCES,
-                self.tr('Nombre maximum final de détection par case'),
+                self.tr('Maximum final detection count per cell'),
                 QgsProcessingParameterNumber.Integer,
                 defaultValue=1000))
                 
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.RPN_NMS_THRESHOLD,
-                self.tr('Seuil de suppression (0 à 1) du RPN'),
+                self.tr('Suppression threshold (0 to 1) for RPN'),
                 QgsProcessingParameterNumber.Double,
                 defaultValue=0.7))
                 
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.POST_NMS_ROIS_INFERENCE,
-                self.tr('Nombre de ROI maximum après filtre RPN'),
+                self.tr('Maximum number of ROI after RPN filter'),
                 QgsProcessingParameterNumber.Integer,
                 defaultValue=2000))
                 
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.DETECTION_NMS_THRESHOLD,
-                self.tr('Seuil de suppression (0 à 1) du NMS'),
+                self.tr('Suppression threshold (0 to 1) for NMS'),
                 QgsProcessingParameterNumber.Double,
                 defaultValue=0.3))
                 
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.PRE_NMS_LIMIT,
-                self.tr('ROI maximum avant filtre NMS'),
+                self.tr('Maximum ROI before NMS filter.'),
                 QgsProcessingParameterNumber.Integer,
                 defaultValue=9000))
         
@@ -193,12 +177,12 @@ class Granu_Mask(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterFeatureSink(
             self.OUTPUT_MASK,
-            self.tr('###########################################\nContour des grains identifié :')))
+            self.tr('###########################################\nContour of identified grains')))
         
         self.addParameter(
             QgsProcessingParameterRasterDestination(
             self.OUTPUT_RAST,
-            self.tr('Image géoréférencé :')))
+            self.tr('Scaled Image :')))
         
         
              
@@ -234,7 +218,6 @@ class Granu_Mask(QgsProcessingAlgorithm):
         tx_sup_grain = self.parameterAsDouble(parameters, self.FILTRE_REC_RESULT, context)
         
         #georeferencement de l'image
-        from PIL import Image
         
         im_file = RAS_IM.source()
         false_len = SCALE_LINE.getFeature(1).geometry().length()
