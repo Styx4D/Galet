@@ -29,10 +29,13 @@ warnings.filterwarnings("ignore")
 import tensorflow as tf
 
 from PIL import Image
+from pathlib import Path
 
-config = tf.ConfigProto()
+from keras.backend import clear_session
+
+config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
-session = tf.Session(config=config)
+session = tf.compat.v1.Session(config=config)
 
 class GALET_image(QgsProcessingAlgorithm):
     
@@ -82,7 +85,7 @@ class GALET_image(QgsProcessingAlgorithm):
               return 'Galet'
               
     def shortHelpString(self):
-        return self.tr(" /!\ Les données (input et output) seront automatiquement reprojeté sur le crs du projet en cours si aucun crs n'est définie.\nSi le crs du projet est invalide il sera automatiquement definie en EPSG 4326")
+        return self.tr(" Qgis Processing for pebbles detection on image")
 
     def initAlgorithm(self, config=None):
 
@@ -248,13 +251,12 @@ class GALET_image(QgsProcessingAlgorithm):
         #########################
         
         path_h5_file = os.path.abspath(input_weight) #ficher h5 as path
-        from pathlib import Path
+        
         mrcnn_path = str(Path(path_h5_file).parents[2]) #dossier Mask_RCNN
         
         #mrcnn
         sys.path.append(mrcnn_path) #librairie mrcnn local
         import mrcnn.model as modellib
-        #from samples.grain import grain #config model
         import grain #config model
         
         config = grain.CustomConfig() #config dans grain.py
@@ -280,33 +282,26 @@ class GALET_image(QgsProcessingAlgorithm):
         
         config = InferenceConfig()
         
-        
-        class_names = ['BG', 'grain']
         model_dir = os.path.join(mrcnn_path, "logs")
         
         #chargement du modele
-        print("Chargement du modéle...")
+        feedback.pushInfo("Model loading...")
         
-        from keras.backend import clear_session
         clear_session()
         model = modellib.MaskRCNN(mode="inference", model_dir = model_dir, config=config)
-        #model.load_weights(path_h5_file, by_name=True, exclude=[ "mrcnn_class_logits", "mrcnn_bbox_fc", "mrcnn_bbox", "mrcnn_mask"])
+
         model.load_weights(path_h5_file, by_name=True)
         model.keras_model._make_predict_function()
-        
-        
         
         #loading raster 
         #open the raster in gdal
         RAS_IM_gdal = gdal.Open(OUT_RAS)
-        
         
         band_1 = np.array(RAS_IM_gdal.GetRasterBand(1).ReadAsArray())
         band_2 = np.array(RAS_IM_gdal.GetRasterBand(2).ReadAsArray())
         band_3 = np.array(RAS_IM_gdal.GetRasterBand(3).ReadAsArray())
         
         bands = np.stack((band_1,band_2,band_3),2)
-     
         
         OUT_RAS=QgsRasterLayer(OUT_RAS)
         rast_ext = OUT_RAS.extent()
@@ -318,17 +313,15 @@ class GALET_image(QgsProcessingAlgorithm):
         len_case_geoY = Len_case_grille * rast_pxlY
         
         #creation d'une grille de x par x pixel
-        print("meshing...")
+        feedback.pushInfo("meshing...")
         
         cut_geom_bb = rast_ext
         cut_width = cut_geom_bb.width()
         cut_height = cut_geom_bb.height()
         
-        
         #top left corner
         x_tlc = cut_geom_bb.xMinimum()
         y_tlc = cut_geom_bb.yMaximum()
-        
         
         #nombre de grille à créer
         ngridx = int((cut_width)/((1-tx_sup_gri)*len_case_geoX))
@@ -345,14 +338,13 @@ class GALET_image(QgsProcessingAlgorithm):
         ov_iter =1
         if tx_sup_gri>0:
             ov_iter=2
-            
+        
         for i in range(int(ngridx)*ov_iter-1):
             if len(points_x)%2>0 :
                 points_x.append(points_x[i]+len_case_geoX)
             else :
                 points_x.append(points_x[i]-tx_sup_gri*len_case_geoX)
-           
-
+        
         for i in range(int(ngridy)*ov_iter-1):
             if len(points_y)%2>0 :
                 points_y.append(points_y[i]-len_case_geoY)
@@ -374,7 +366,7 @@ class GALET_image(QgsProcessingAlgorithm):
         y_rast_ext = rast_ext.yMaximum()
         
         #coord en pxl
-        print("converting grid to pxl...")
+        feedback.pushInfo("converting grid to pxl...")
         x_pxl_tlc = round((x0-x_rast_ext)/rast_pxlX)
         grid_x_pxl = [round(x_pxl_tlc+(gridx[i]-x0)/rast_pxlX) for i in range(len(gridx))]
         
@@ -382,12 +374,12 @@ class GALET_image(QgsProcessingAlgorithm):
         grid_y_pxl = [round(y_pxl_tlc+(y0-gridy[i])/rast_pxlY) for i in range(len(gridy))]
         
         #converting to QgsGeometry
-        print("conversion des points en Geom")
+        feedback.pushInfo("Converting to QgsGeometry")
         
-        data= [[[i],[],[],[],[],[]] for i in range(int((ngridx+1)*(ngridy+1)))] #img, bbox, bbox unoverlap, increment, bbox en pxl, extent = xmini et y maxi
+        data= [[[i],[],[],[],[],[]] for i in range(int((ngridx+1)*(ngridy+1)))] # img, bbox, bbox unoverlap, increment, bbox pxl, extent = x_mini & y_maxi
         nimg=0
         nite=1
-        print(len(data))
+
         for a in range(0,len(gridy),2+int(ngridx)*ov_iter):
             for i in range(0+a,2+int(ngridx)*ov_iter+a,2):
                 
@@ -415,17 +407,16 @@ class GALET_image(QgsProcessingAlgorithm):
 
         #detecting 
         results=[]
-        print("MaskR CNN detection...")
+        feedback.pushInfo("MaskR CNN detection...")
         
         for i in range(len(data)):
-            array_d = bands[data[i][4][2]:data[i][4][3],\
-                data[i][4][0]:data[i][4][1],:]
+            array_d = bands[ data[i][4][2]:data[i][4][3], data[i][4][0]:data[i][4][1], :]
 
             print("image ",i+1," on " ,len(data),". Shape: ",array_d.shape)
             results.append(model.detect([array_d], verbose=0))
         
         #mask --> SHP
-        print("converting to vector")
+        feedback.pushInfo("converting to vector")
         poly=[]
         id_data=0
         for result in results:
@@ -443,15 +434,15 @@ class GALET_image(QgsProcessingAlgorithm):
         res = ({'geometry': s} for i, (s, _) in enumerate(poly))
         
         geoms = list(res)
-        print("converting to QgsGeometry() type")
+        feedback.pushInfo("converting to QgsGeometry() type")
         geoms_coords =[geoms[i]["geometry"]["coordinates"][0] for i in range(len(geoms))]
         
         polygon = [QgsGeometry.fromPolygonXY([[QgsPointXY(geoms_coords[i][j][0],geoms_coords[i][j][1]) \
                             for j in range(len(geoms_coords[i]))]]) for i in range(len(geoms_coords)) ]
         
         #cleaning polygons
-        print("cleaning "+str(len(polygon))+" polygons")
-        print("remove doublons")
+        feedback.pushInfo("cleaning "+str(len(polygon))+" polygons")
+        feedback.pushInfo("remove doublons")
         center_p = []
         double_pol = []
         for i in range(len(polygon)):
@@ -473,13 +464,13 @@ class GALET_image(QgsProcessingAlgorithm):
         
         over_unover = over_merge.difference(unover_merge)
         
-        print("determination des poly to clean")
+        feedback.pushInfo("determination des poly to clean")
         #polygon_to_clean = [polygon[i] for i in range(len(polygon)) if polygon[i].intersects(over_unover)]
         polygon_to_clean = [polygon[i] for i in range(len(polygon))]
-        print("remaining..")
+        feedback.pushInfo("remaining..")
         #polygon_clean = [polygon[i] for i in range(len(polygon)) if not polygon[i].intersects(over_unover)]
         
-        print("calculating crossed...")
+        feedback.pushInfo("calculating crossed...")
         id_inter = [[[i,j] for i in range(len(polygon_to_clean)) if polygon_to_clean[i].boundingBoxIntersects(polygon_to_clean[j]) and i!=j]\
                             for j in range(len(polygon_to_clean)) ]
         #flat it
@@ -489,7 +480,7 @@ class GALET_image(QgsProcessingAlgorithm):
         #set it
         sort_id = list(set(tuple(i) for i in sort_id))
          
-        print("computing IoU")
+        feedback.pushInfo("computing IoU")
         to_merge =[sort_id[i][:] for i in range(len(sort_id)) if \
             polygon_to_clean[sort_id[i][0]].intersection(polygon_to_clean[sort_id[i][1]]).area()\
             /polygon_to_clean[sort_id[i][1]].area()>0.7 or \
@@ -497,7 +488,7 @@ class GALET_image(QgsProcessingAlgorithm):
             /polygon_to_clean[sort_id[i][0]].area()>0.7 ]
         
         #merging polygons
-        print("merging  les doublons")
+        feedback.pushInfo("merging  les doublons")
         to_del=[]
         for id in to_merge:
             polygon_to_clean[id[0]]=QgsGeometry.unaryUnion([polygon_to_clean[id[0]],polygon_to_clean[id[1]]])
@@ -507,7 +498,7 @@ class GALET_image(QgsProcessingAlgorithm):
         
         
         
-        print("writing file...")
+        feedback.pushInfo("writing file...")
         """
         if any(polygon_clean):
             for poly in polygon_clean:

@@ -25,14 +25,16 @@ from osgeo import gdal, osr
 import numpy as np
 
 import rasterio
+from rasterio import features as rasterio_features
 from rasterio import Affine as A
 import warnings
 warnings.filterwarnings("ignore")
 
 import tensorflow as tf
-config = tf.ConfigProto()
+
+config = tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
-session = tf.Session(config=config)
+session = tf.compat.v1.Session(config=config)
 
 from shapely.geometry import box
 from rtree import index
@@ -463,7 +465,7 @@ class GALET_Georef(QgsProcessingAlgorithm):
                         
                         mask_array = np.array(r['masks'][:, :, i],dtype=np.uint8)
                         #rasterio : (array, masque (non digitalisation de 0), transformation)
-                        for vec in rasterio.features.shapes(mask_array, mask_array,
+                        for vec in rasterio_features.shapes(mask_array, mask_array,
                             transform=A.translation(clean_data[id_data][5][0],
                             clean_data[id_data][5][1]) * A.scale(rast_pxlX, -rast_pxlY)):
                             
