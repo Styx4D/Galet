@@ -274,7 +274,7 @@ class GALET_Georef(QgsProcessingAlgorithm):
         model = modellib.MaskRCNN(mode="inference", model_dir = model_dir, config=config)
         #model.load_weights(path_h5_file, by_name=True, exclude=[ "mrcnn_class_logits", "mrcnn_bbox_fc", "mrcnn_bbox", "mrcnn_mask"])
         model.load_weights(path_h5_file, by_name=True)
-        model.keras_model._make_predict_function()
+        # model.keras_model._make_predict_function()
         
         
         
@@ -453,7 +453,10 @@ class GALET_Georef(QgsProcessingAlgorithm):
                     clean_data[i][4][0]:clean_data[i][4][1],:]
                 
                 feedback.pushInfo("image "+str(i+1)+" on " +str(len(clean_data))+". Shape: "+str(array_d.shape))
-                results.append(model.detect([array_d], verbose=0))
+                res = model.detect([array_d], verbose=0)
+                results.append(res)
+
+                feedback.pushInfo("Found "+str( res[0]['masks'].shape[2])+" pebbles")
             
             #mask --> SHP
             feedback.pushInfo("converting to vector")
@@ -464,6 +467,7 @@ class GALET_Georef(QgsProcessingAlgorithm):
                     for i in range(r['rois'].shape[0]):
                         
                         mask_array = np.array(r['masks'][:, :, i],dtype=np.uint8)
+                        
                         #rasterio : (array, masque (non digitalisation de 0), transformation)
                         for vec in rasterio_features.shapes(mask_array, mask_array,
                             transform=A.translation(clean_data[id_data][5][0],
@@ -471,8 +475,9 @@ class GALET_Georef(QgsProcessingAlgorithm):
                             
                             poly.append(vec)
                 id_data+=1
-            res = ({'geometry': s} for i, (s, _) in enumerate(poly))
             
+            res = ({'geometry': s} for i, (s, _) in enumerate(poly))
+            feedback.pushInfo(str(len(poly)))
             geoms = list(res)
             feedback.pushInfo("converting to QgsGeometry() type")
             geoms_coords =[geoms[i]["geometry"]["coordinates"][0] for i in range(len(geoms))]

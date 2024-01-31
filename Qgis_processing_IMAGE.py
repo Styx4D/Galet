@@ -291,7 +291,7 @@ class GALET_image(QgsProcessingAlgorithm):
         model = modellib.MaskRCNN(mode="inference", model_dir = model_dir, config=config)
 
         model.load_weights(path_h5_file, by_name=True)
-        model.keras_model._make_predict_function()
+        # model.keras_model._make_predict_function()
         
         #loading raster 
         #open the raster in gdal
@@ -411,6 +411,7 @@ class GALET_image(QgsProcessingAlgorithm):
         
         for i in range(len(data)):
             array_d = bands[ data[i][4][2]:data[i][4][3], data[i][4][0]:data[i][4][1], :]
+            array_d = bands[::-1, ::-1, :]
 
             print("image ",i+1," on " ,len(data),". Shape: ",array_d.shape)
             results.append(model.detect([array_d], verbose=0))
