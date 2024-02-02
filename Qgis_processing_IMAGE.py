@@ -143,7 +143,7 @@ class GALET_image(QgsProcessingAlgorithm):
                 self.SCALE_RAST,
                 self.tr('Scale to use'),
                 QgsProcessingParameterNumber.Double,
-                defaultValue =3))
+                defaultValue =2))
                 
         self.addParameter(
             QgsProcessingParameterNumber(
@@ -467,7 +467,12 @@ class GALET_image(QgsProcessingAlgorithm):
         results=[]
         feedback.pushInfo("MaskR CNN detection...")
         
-
+        def resize_any_depth(arr, new_size):
+            accepted_depth = np.min(arr.shape[:2])
+            ret = cv.resize(arr[:,:,:accepted_depth], new_size)
+            for i in range(accepted_depth,arr.shape[2],accepted_depth):
+                ret = np.concatenate((ret, cv.resize(arr[:,:,i:min(i+accepted_depth,arr.shape[2])], new_size)), axis=2)
+            return ret
         
         for i in range(len(data)):
             array_d = bands[ data[i][4][2]:data[i][4][3], data[i][4][0]:data[i][4][1], :]
@@ -479,7 +484,7 @@ class GALET_image(QgsProcessingAlgorithm):
             r = self.call_inference(array_d, SA)
             
             mask_array = np.array(r[0]['masks'],dtype=np.uint8)
-            r[0]['masks'] = cv.resize( mask_array, prev_shape)
+            r[0]['masks'] = resize_any_depth( mask_array, prev_shape)
             results.append(r)
         
         #mask --> SHP
