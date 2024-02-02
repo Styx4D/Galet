@@ -1,0 +1,9 @@
+numpy
+scipy
+Pillow
+cython
+matplotlib
+scikit-image
+tensorflow-gpu<2.11
+keras
+imgaug
