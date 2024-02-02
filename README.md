@@ -1,8 +1,9 @@
 # Galet
 Official repository of [GALET : A Deep Learning Image Segmentation Model for Drone-Based Grain Size Analysis of Gravel Bars](https://www.researchgate.net/publication/362231914_GALET_A_deep_learning_image_segmentation_model_for_drone-based_grain_size_analysis_of_gravel_bars)
 
-The repository is based on the implementation of  [Mask R CNN from Matterport](https://github.com/matterport/Mask_RCNN), modified to run on tensorflow 2.X.
-Our approach is a local Server-Client Implementation. The user starts a Server (Mask-R-CNN) that will handle all of the image processing, while a QGis acts as a Client, and is used as the GUI and for the exploitation of segmentation results. This approach was driven by the difficulty of having QGis and TensorFlow work together properly into an unique Conda space. Please note that this is a localhost Client/Server approach. None of your data is sent on Internet.
+The repository is based upon the implementation of  [Mask R CNN from Matterport](https://github.com/matterport/Mask_RCNN), modified to run on tensorflow 2.X.
+
+Our approach is a local Server-Client Implementation. The user starts a Server (Mask-R-CNN) designed to handle all of the image processing, while QGis is considered as a Client, and is used as both a GUI and the tool for exploiting segmentation results. This approach was driven by the difficulty of having QGis and TensorFlow working together properly into an unique Conda space. Please note that this is a localhost Client/Server approach. None of the data shared between environments is sent on Internet.
 
 
 ## Preparing the installation
@@ -21,20 +22,20 @@ This installation procedure is based upon Conda.
 conda create -n galet_server python=3.9
 conda activate galet_server
 ```
-**You need every following step to be performed under the newly created galet_server conda environment**
+**You need every of the following steps to be performed under the newly created galet_server conda environment**
 
-2 - (skip this section if you don't want to, or can't run GALET on GPU)
+2 - _skip this section if you don't want to, or can't run GALET on GPU_
 Ensure that you have CUDA properly installed and setup by running
 ```bash
 nvidia-smi
 ```
-(if this command is not recognized, run the CUDA installation again and/or set the CUDA_PATH variable in your environment. Use Google for further instructions. If you change the PATH, you need to launch the Anaconda Prompt again (don't forget to activate the galet server environment) so that it is taken into account.
-Then link your conda environment to CUDA
+if this command is not recognized, run the CUDA installation again and/or set the CUDA_PATH variable in your environment. Use Google for further instructions. If you modify any environment value, including PATH or CUDA_PATH, you need to launch the Anaconda Prompt again so that it is taken into account. Don't forget to activate the galet server environment again if you ever happen to do so.
+Link your conda environment to CUDA. Versions used below are the last ones that allow native Windows GPU usage on Tensorflow.
 ```bash
 conda install -c conda-forge cudatoolkit=11.2 cudnn=8.1.0
 ```
 
-3 - From the root folder of this project, install the server libraries
+3 - From the root folder of the Galet project, install the server libraries
 ```bash
 pip install -r requirements-server.txt
 ```
@@ -49,7 +50,7 @@ Leave this window open as long as you need to use the Mask-R-CNN network. You ca
 ## QGis Client Installation
 
 ### With Conda
-1 - From an Anaconda Prompt, create a conda environment (any Python version>3.8 should be suitable)
+1 - From a new Anaconda Prompt, create a conda environment (any Python version>=3.8 is suitable)
 ```bash
 conda create -n galet_qgis
 conda activate galet_qgis
@@ -68,17 +69,17 @@ qgis
 
 
 ## How to use
-1 - Within the server environment, launch the Mask-R-CNN server
+1 - Within the server environment, launch the Mask-R-CNN server (4th step in the server installation section)
 
-2 - Within the client environment, launch QGis
+2 - Within the client environment, launch QGis (3rd step in the QGis client installation section)
 
-3 - Once in qgis, open the processing tool box and add script to toolbox `Qgis_processing_IMAGE.py` and `Qgis_processing_ORTHO.py`.
+3 - Once in qgis, open the processing tool box and add both scripts to the toolbox `Qgis_processing_IMAGE.py` and `Qgis_processing_ORTHO.py`.
 They will appear under Galet
 
 ![](img/Image2.png)
 
 
-4 - Run GALET_georef for georeferenced orthomosaic, or GALET_image for ungeoreferenced image
+4 - Run GALET_georef for georeferenced orthomosaics, or GALET_image for ungeoreferenced images
 
 ![](img/Image1.png)
 
