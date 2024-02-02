@@ -51,6 +51,8 @@ import pickle
 
 import copy
 
+from itertools import chain
+
 class GALET_image(QgsProcessingAlgorithm):
     
     #INPUT
@@ -496,83 +498,84 @@ class GALET_image(QgsProcessingAlgorithm):
                         
                         poly.append(vec)
             id_data+=1
+
+
         res = ({'geometry': s} for i, (s, _) in enumerate(poly))
-        
         geoms = list(res)
+
         feedback.pushInfo("converting to QgsGeometry() type")
         geoms_coords =[geoms[i]["geometry"]["coordinates"][0] for i in range(len(geoms))]
         
-        polygon = [QgsGeometry.fromPolygonXY([[QgsPointXY(geoms_coords[i][j][0],geoms_coords[i][j][1]) \
+        polygon_to_clean = [QgsGeometry.fromPolygonXY([[QgsPointXY(geoms_coords[i][j][0],geoms_coords[i][j][1]) \
                             for j in range(len(geoms_coords[i]))]]) for i in range(len(geoms_coords)) ]
         
         #cleaning polygons
-        feedback.pushInfo("cleaning "+str(len(polygon))+" polygons")
-        center_p = []
-        double_pol = []
-        for i in range(len(polygon)):
-            poly = polygon[i]
-            if [poly.centroid().asPoint().x(),poly.centroid().asPoint().y()] not in center_p :
-                center_p.append([poly.centroid().asPoint().x(),poly.centroid().asPoint().y()])
-            else:
-                double_pol.append(i)
-        
-        polygon = [polygon[i] for i in range(len(polygon)) if i not in double_pol]
-
-        #calculation clean area = grain on bbox unverlap
-        
-        unover_poly = [QgsGeometry.fromPolygonXY([data[i][2]]) for i in range(len(data))]
-        unover_merge = QgsGeometry.unaryUnion(unover_poly)
-        
-        over_poly = [QgsGeometry.fromPolygonXY([data[i][1]]) for i in range(len(data))]
-        over_merge = QgsGeometry.unaryUnion(over_poly)
-        
-        over_unover = over_merge.difference(unover_merge)
-        
-        feedback.pushInfo("determination des poly to clean")
-        #polygon_to_clean = [polygon[i] for i in range(len(polygon)) if polygon[i].intersects(over_unover)]
-        polygon_to_clean = [polygon[i] for i in range(len(polygon))]
-        feedback.pushInfo("remaining..")
-        #polygon_clean = [polygon[i] for i in range(len(polygon)) if not polygon[i].intersects(over_unover)]
-        
+        feedback.pushInfo("cleaning "+str(len(polygon_to_clean))+" polygons")
+     
         feedback.pushInfo("calculating crossed...")
-        id_inter = [[[i,j] for i in range(len(polygon_to_clean)) if polygon_to_clean[i].boundingBoxIntersects(polygon_to_clean[j]) and i!=j]\
+        id_inter = [[[i,j] for i in range(len(polygon_to_clean)) if polygon_to_clean[i].boundingBoxIntersects(polygon_to_clean[j].boundingBox()) and i!=j]\
                             for j in range(len(polygon_to_clean)) ]
-        #flat it
+        #flat, sort and set
         id_inter = [item for sublist in id_inter for item in sublist]
-        #sort to avoid doublon
         sort_id = [sorted(id_inter[i]) for i in range(len(id_inter)) if any(id_inter[i])]
-        #set it
         sort_id = list(set(tuple(i) for i in sort_id))
          
         feedback.pushInfo("computing IoU")
         to_merge =[sort_id[i][:] for i in range(len(sort_id)) if \
             polygon_to_clean[sort_id[i][0]].intersection(polygon_to_clean[sort_id[i][1]]).area()\
-            /polygon_to_clean[sort_id[i][1]].area()>0.7 or \
+            /polygon_to_clean[sort_id[i][1]].area()>tx_sup_grain or \
             polygon_to_clean[sort_id[i][0]].intersection(polygon_to_clean[sort_id[i][1]]).area()\
-            /polygon_to_clean[sort_id[i][0]].area()>0.7 ]
+            /polygon_to_clean[sort_id[i][0]].area()>tx_sup_grain ]
         
         #merging polygons
-        feedback.pushInfo("merging  les doublons")
-        to_del=[]
-        for id in to_merge:
-            polygon_to_clean[id[0]]=QgsGeometry.unaryUnion([polygon_to_clean[id[0]],polygon_to_clean[id[1]]])
-            to_del.append(id[1])
+        feedback.pushInfo("merging duplicates")
+        class UnionFind:
+            def __init__(self):
+                self.parent = {}
+
+            def find(self, u):
+                if u != self.parent.setdefault(u, u):
+                    self.parent[u] = self.find(self.parent[u])
+                return self.parent[u]
+
+            def union(self, u, v):
+                root_u, root_v = self.find(u), self.find(v)
+                if root_u != root_v:
+                    self.parent[root_u] = root_v
+
+        def merge_lists_with_common_ids(id_list):
+            union_find = UnionFind()
+
+            for ids in id_list:
+                for id_ in ids:
+                    union_find.find(id_)
+
+            for ids in id_list:
+                union_find.union(ids[0], ids[1])
+
+            merged_lists = {}
+            for id_ in union_find.parent.keys():
+                root = union_find.find(id_)
+                if root not in merged_lists:
+                    merged_lists[root] = [id_]
+                else:
+                    merged_lists[root].append(id_)
+
+            return list(merged_lists.values())
+
+
+        to_del= list(chain.from_iterable(to_merge))
+        to_merge_comb = merge_lists_with_common_ids(to_merge)
+        to_ext = []
+        for list_comb_ids in to_merge_comb:
+            list_comb = [ polygon_to_clean[i] for i in list_comb_ids ]
+            to_ext.append( QgsGeometry.unaryUnion( list_comb ) )
             
         polygon_cleany = [polygon_to_clean[i] for i in range(len(polygon_to_clean)) if i not in to_del]
-        
-        
+        polygon_cleany.extend(to_ext)
         
         feedback.pushInfo("writing file...")
-        """
-        if any(polygon_clean):
-            for poly in polygon_clean:
-                f = QgsFeature()
-                f.setGeometry(poly)
-                #axe b
-                dist = 2*np.sqrt(poly.closestSegmentWithContext(poly.centroid().asPoint())[0])
-                f.setAttributes([str(dist)])
-                Mask_shp.addFeature(f , QgsFeatureSink.FastInsert)
-        """
+        
         if any(polygon_cleany):
             for poly in polygon_cleany:
                 f = QgsFeature()
