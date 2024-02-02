@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+from re import S
 from qgis.PyQt.QtCore import QCoreApplication
 from qgis.core import (QgsFeatureSink,
                        QgsProcessingAlgorithm,
@@ -22,20 +23,33 @@ from qgis.PyQt.QtCore import QVariant
 from osgeo import gdal
 import numpy as np
 
-import rasterio
-from rasterio import Affine as A
-import warnings
-warnings.filterwarnings("ignore")
-import tensorflow as tf
+import subprocess
+try: 
+    import rasterio
+    from rasterio import Affine as A
+except:
+    subprocess.check_call(['python', '-m', 'pip', 'install', 'rasterio==1.3.9'])
+    import rasterio
+    from rasterio import Affine as A
 
-from PIL import Image
+try:
+    from PIL import Image
+except:
+    subprocess.check_call(['python', '-m', 'pip', 'install', 'pillow'])
+    from PIL import Image
+
+try:
+    import cv2 as cv
+except:
+    subprocess.check_call(['python', '-m', 'pip', 'install', 'opencv-python==4.9.0'])
+    import cv2 as cv
+    
 from pathlib import Path
 
-from keras.backend import clear_session
+import socket
+import pickle
 
-config = tf.compat.v1.ConfigProto()
-config.gpu_options.allow_growth = True
-session = tf.compat.v1.Session(config=config)
+import copy
 
 class GALET_image(QgsProcessingAlgorithm):
     
@@ -47,12 +61,12 @@ class GALET_image(QgsProcessingAlgorithm):
     SCALE_LEN = 'SCALE_LEN'
     
     #OUTPUT
-    OUTPUT_MASK = 'OUTPUT_MASK' #vecteur polygone des grains identifiés
+    OUTPUT_MASK = 'OUTPUT_MASK' 
    
     #config general
-    CUT_RAST = 'CUT_RAST' #longueur case
-    CUT_SUPERPOS = 'CUT_SUPERPOS' #taux de recouvrement grille
-    FILTRE_REC_RESULT = 'FILTRE_REC_RESULT' #tx de recouvrement grain
+    SCALE_RAST = 'SCALE_RAST' 
+    CUT_SUPERPOS = 'CUT_SUPERPOS' 
+    FILTRE_REC_RESULT = 'FILTRE_REC_RESULT' 
     
     #config mrcnn
     IMAGE_MAX_DIM = 'IMAGE_MAX_DIM'
@@ -62,6 +76,9 @@ class GALET_image(QgsProcessingAlgorithm):
     DETECTION_NMS_THRESHOLD = 'DETECTION_NMS_THRESHOLD'
     PRE_NMS_LIMIT = 'PRE_NMS_LIMIT'
     OUTPUT_RAST = 'OUTPUT_RAST'
+
+    HOST, PORT = "localhost", 9999
+    BUFF_SIZE = 65536
     
     def __init__(self):
         super().__init__()
@@ -121,10 +138,10 @@ class GALET_image(QgsProcessingAlgorithm):
                 
         self.addParameter(
             QgsProcessingParameterNumber(
-                self.CUT_RAST,
-                self.tr('Cut length of the cells (pixels)'),
+                self.SCALE_RAST,
+                self.tr('Scale to use'),
                 QgsProcessingParameterNumber.Double,
-                defaultValue =512))
+                defaultValue =3))
                 
         self.addParameter(
             QgsProcessingParameterNumber(
@@ -180,15 +197,67 @@ class GALET_image(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterFeatureSink(
             self.OUTPUT_MASK,
-            self.tr('###########################################\nContour of identified grains')))
+            self.tr('Contour of identified grains')))
         
         self.addParameter(
             QgsProcessingParameterRasterDestination(
             self.OUTPUT_RAST,
-            self.tr('Scaled Image :')))
+            self.tr('Scaled Image')))
         
         
-             
+    def exchange_with_server(self, instructions_dict):
+        # send/receive data from conda env
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            # Connect to server and send data
+            sock.connect((self.HOST, self.PORT))
+            #pickled_dict = pickle.dumps()
+
+            print("sending data...")
+            sock.sendall(pickle.dumps(instructions_dict))
+            print("... data sent")
+
+            data = []
+            while True:
+                try :
+                    packet = sock.recv(self.BUFF_SIZE)
+                    if len(packet)<self.BUFF_SIZE:
+                        data.append(packet)
+                        break
+                    elif not packet:
+                        break
+                except : 
+                    break
+                data.append(packet)
+                time.sleep(0.001)
+                # set it only after the 1st receive so that it wan wait for the computation to happen
+                sock.settimeout(1.)
+                  
+            received_response = pickle.loads(b"".join(data))
+
+            return received_response
+        return {'status':'Connection failed'}
+
+    def call_inference(self, img, SA):
+        imshared, shm_img, transfer_dict = SA.shareNPArray(img)
+
+        # Send it to the server and wait for the response
+        response_dict = self.exchange_with_server({'infer':transfer_dict})
+
+        shared_msks, shm_msks = SA.readSharedNPArray(response_dict['masks'])
+        shared_rois, shm_rois = SA.readSharedNPArray(response_dict['rois'])
+        shared_cids, shm_cids = SA.readSharedNPArray(response_dict['class_ids'])
+        shared_scrs, shm_scrs = SA.readSharedNPArray(response_dict['scores'])
+
+        # put them in the correct data structure
+        result = [{'masks':copy.deepcopy(shared_msks), 'rois':copy.deepcopy(shared_rois), 'class_ids':copy.deepcopy(shared_cids), 'scores':copy.deepcopy(shared_scrs)}]
+
+        # release the shared memory
+        SA.closeSharedNPArrays([shm_msks, shm_rois, shm_cids, shm_scrs, shm_img], unlink=True)
+
+        return result
+    
+
     def processAlgorithm(self, parameters, context, feedback):
             
         ############################################################
@@ -216,7 +285,7 @@ class GALET_image(QgsProcessingAlgorithm):
         outMask.append(QgsField("Len", QVariant.String))
         
         #config general
-        Len_case_grille = self.parameterAsDouble(parameters, self.CUT_RAST, context)
+        n_scale = self.parameterAsDouble(parameters, self.SCALE_RAST, context)
         tx_sup_gri = self.parameterAsDouble(parameters, self.CUT_SUPERPOS, context)
         tx_sup_grain = self.parameterAsDouble(parameters, self.FILTRE_REC_RESULT, context)
         
@@ -234,17 +303,15 @@ class GALET_image(QgsProcessingAlgorithm):
 
         gt = rast_src.GetGeoTransform()
         gtl = list(gt)
-        gtl[0] = 20000
+        gtl[0] = 0
         _, ytodel = im.size
-        gtl[3] = 20000-ytodel
-        gtl[1] =  -scale
-        gtl[5] =  scale
+        gtl[3] = ytodel * scale + 1
+        gtl[1] =  scale
+        gtl[5] =  -scale
         rast_src.SetGeoTransform(tuple(gtl))
         rast_src = None
         
         (Mask_shp, dest_id) = self.parameterAsSink(parameters, self.OUTPUT_MASK, context, outMask, QgsWkbTypes.MultiPolygon, RAS_IM.crs())
-
-        
         
         #########################
         #### mrcnn config #######
@@ -253,46 +320,28 @@ class GALET_image(QgsProcessingAlgorithm):
         path_h5_file = os.path.abspath(input_weight) #ficher h5 as path
         
         mrcnn_path = str(Path(path_h5_file).parents[2]) #dossier Mask_RCNN
+
+        sys.path.append(mrcnn_path) # mrcnn local
+        import ShareArrays as SA
         
-        #mrcnn
-        sys.path.append(mrcnn_path) #librairie mrcnn local
-        import mrcnn.model as modellib
-        import grain #config model
-        
-        config = grain.CustomConfig() #config dans grain.py
-        
-        #on change quelques paramètres suivant l'utilisateur
-        config_a = self.parameterAsInt(parameters, self.IMAGE_MAX_DIM, context)
-        config_b = self.parameterAsInt(parameters, self.DETECTION_MAX_INSTANCES, context)
-        config_c = self.parameterAsDouble(parameters, self.RPN_NMS_THRESHOLD, context)
-        config_d = self.parameterAsInt(parameters, self.POST_NMS_ROIS_INFERENCE, context)
-        config_e = self.parameterAsDouble(parameters, self.DETECTION_NMS_THRESHOLD, context)
-        config_f = self.parameterAsInt(parameters, self.PRE_NMS_LIMIT, context)
-        
-        class InferenceConfig(config.__class__):
-                IMAGE_MAX_DIM = config_a #default 1024
-                DETECTION_MAX_INSTANCES = config_b  #Max number of final detections default 100
-                RPN_NMS_THRESHOLD = config_c # Non-max suppression threshold to filter RPN proposals. default 0.7
-                POST_NMS_ROIS_INFERENCE = config_d # ROIs kept after non-maximum suppression (training and inference) default 1000
-                DETECTION_NMS_THRESHOLD = config_e # Non-maximum suppression threshold for detection default 0.3
-                PRE_NMS_LIMIT = config_f # ROIs kept after tf.nn.top_k and before non-maximum suppression default 6000
-                DETECTION_MIN_CONFIDENCE = 0.001
-                IMAGE_RESIZE_MODE = "square"
-                #RPN_ANCHOR_SCALES = (8,16, 32, 64, 128)
-        
-        config = InferenceConfig()
-        
-        model_dir = os.path.join(mrcnn_path, "logs")
+        max_dim_infer = self.parameterAsInt(parameters, self.IMAGE_MAX_DIM, context)
+        config_dict = {
+            'config': {
+                self.IMAGE_MAX_DIM           : max_dim_infer,
+                self.DETECTION_MAX_INSTANCES : self.parameterAsInt(parameters, self.DETECTION_MAX_INSTANCES, context),
+                self.RPN_NMS_THRESHOLD       : self.parameterAsDouble(parameters, self.RPN_NMS_THRESHOLD, context),
+                self.POST_NMS_ROIS_INFERENCE : self.parameterAsInt(parameters, self.POST_NMS_ROIS_INFERENCE, context),
+                self.DETECTION_NMS_THRESHOLD : self.parameterAsDouble(parameters, self.DETECTION_NMS_THRESHOLD, context),
+                self.PRE_NMS_LIMIT           : self.parameterAsInt(parameters, self.PRE_NMS_LIMIT, context),
+                'path_h5_file'          : path_h5_file
+                }
+            }
         
         #chargement du modele
         feedback.pushInfo("Model loading...")
-        
-        clear_session()
-        model = modellib.MaskRCNN(mode="inference", model_dir = model_dir, config=config)
+        ret_dict = self.exchange_with_server(config_dict)
+        feedback.pushInfo(ret_dict['status'])
 
-        model.load_weights(path_h5_file, by_name=True)
-        # model.keras_model._make_predict_function()
-        
         #loading raster 
         #open the raster in gdal
         RAS_IM_gdal = gdal.Open(OUT_RAS)
@@ -309,12 +358,11 @@ class GALET_image(QgsProcessingAlgorithm):
         rast_pxlX = OUT_RAS.rasterUnitsPerPixelX()
         rast_pxlY = OUT_RAS.rasterUnitsPerPixelY()
         
-        len_case_geoX = Len_case_grille * rast_pxlX
-        len_case_geoY = Len_case_grille * rast_pxlY
-        
-        #creation d'une grille de x par x pixel
+
+        # create the grid to infer the image
         feedback.pushInfo("meshing...")
-        
+        min_shape = min(bands.shape[:2])
+
         cut_geom_bb = rast_ext
         cut_width = cut_geom_bb.width()
         cut_height = cut_geom_bb.height()
@@ -322,99 +370,115 @@ class GALET_image(QgsProcessingAlgorithm):
         #top left corner
         x_tlc = cut_geom_bb.xMinimum()
         y_tlc = cut_geom_bb.yMaximum()
-        
-        #nombre de grille à créer
-        ngridx = int((cut_width)/((1-tx_sup_gri)*len_case_geoX))
-        ngridy = int((cut_height)/((1-tx_sup_gri)*len_case_geoY))
-        
-        points_x = [x_tlc]
-        points_y = [y_tlc]
-        
-        x0=x_tlc
-        y0=y_tlc
-        
-        #coord x et y
-        #si overlap est nul, une seul iter
-        ov_iter =1
-        if tx_sup_gri>0:
-            ov_iter=2
-        
-        for i in range(int(ngridx)*ov_iter-1):
-            if len(points_x)%2>0 :
-                points_x.append(points_x[i]+len_case_geoX)
-            else :
-                points_x.append(points_x[i]-tx_sup_gri*len_case_geoX)
-        
-        for i in range(int(ngridy)*ov_iter-1):
-            if len(points_y)%2>0 :
-                points_y.append(points_y[i]-len_case_geoY)
-            else:
-                points_y.append(points_y[i]+tx_sup_gri*len_case_geoY)
-            
-        #last one pour tout recouvrir
-        points_x.extend([x_tlc+cut_width-len_case_geoX,x_tlc+cut_width])
-        points_y.extend([y_tlc-cut_height+len_case_geoY,y_tlc-cut_width])
-        
-        #mesh&flat
-        gridx, gridy = np.meshgrid(points_x,points_y)
-        gridx=gridx.flatten()
-        gridy=gridy.flatten()
-        
-        #converting grid to pxl value
-        #coord du raster top left corner
-        x_rast_ext = rast_ext.xMinimum()
-        y_rast_ext = rast_ext.yMaximum()
-        
-        #coord en pxl
-        feedback.pushInfo("converting grid to pxl...")
-        x_pxl_tlc = round((x0-x_rast_ext)/rast_pxlX)
-        grid_x_pxl = [round(x_pxl_tlc+(gridx[i]-x0)/rast_pxlX) for i in range(len(gridx))]
-        
-        y_pxl_tlc = round((y_rast_ext-y0)/rast_pxlY)
-        grid_y_pxl = [round(y_pxl_tlc+(y0-gridy[i])/rast_pxlY) for i in range(len(gridy))]
-        
-        #converting to QgsGeometry
-        feedback.pushInfo("Converting to QgsGeometry")
-        
-        data= [[[i],[],[],[],[],[]] for i in range(int((ngridx+1)*(ngridy+1)))] # img, bbox, bbox unoverlap, increment, bbox pxl, extent = x_mini & y_maxi
-        nimg=0
-        nite=1
 
-        for a in range(0,len(gridy),2+int(ngridx)*ov_iter):
-            for i in range(0+a,2+int(ngridx)*ov_iter+a,2):
+        for ns in range(1, int(n_scale) + 1):
+             
+            len_case_geoX = min_shape / ns * rast_pxlX
+            len_case_geoY = min_shape / ns * rast_pxlY
+        
+            #nombre de grille à créer
+            ngridx = int((cut_width)/((1-tx_sup_gri)*len_case_geoX))
+            ngridy = int((cut_height)/((1-tx_sup_gri)*len_case_geoY))
+        
+            points_x = [x_tlc]
+            points_y = [y_tlc]
+            
+            x0=x_tlc
+            y0=y_tlc
+        
+            #coord x et y
+            #si overlap est nul, une seul iter
+            ov_iter =1
+            if tx_sup_gri>0:
+                ov_iter=2
+            
+            for i in range(int(ngridx)*ov_iter-1):
+                if len(points_x)%2>0 :
+                    points_x.append(points_x[i]+len_case_geoX)
+                else :
+                    points_x.append(points_x[i]-tx_sup_gri*len_case_geoX)
+            
+            for i in range(int(ngridy)*ov_iter-1):
+                if len(points_y)%2>0 :
+                    points_y.append(points_y[i]-len_case_geoY)
+                else:
+                    points_y.append(points_y[i]+tx_sup_gri*len_case_geoY)
+                
+            #last one pour tout recouvrir
+            points_x.extend([x_tlc+cut_width-len_case_geoX,x_tlc+cut_width])
+            points_y.extend([y_tlc-cut_height+len_case_geoY,y_tlc-cut_width])
+            
+            #mesh&flat
+            gridx, gridy = np.meshgrid(points_x,points_y)
+            gridx=gridx.flatten()
+            gridy=gridy.flatten()
+            
+            #converting grid to pxl value
+            #coord du raster top left corner
+            x_rast_ext = rast_ext.xMinimum()
+            y_rast_ext = rast_ext.yMaximum()
+        
+            #coord en pxl
+            x_pxl_tlc = round((x0-x_rast_ext)/rast_pxlX)
+            grid_x_pxl = [round(x_pxl_tlc+(gridx[i]-x0)/rast_pxlX) for i in range(len(gridx))]
+            
+            y_pxl_tlc = round((y_rast_ext-y0)/rast_pxlY)
+            grid_y_pxl = [round(y_pxl_tlc+(y0-gridy[i])/rast_pxlY) for i in range(len(gridy))]
+            
+            #converting to QgsGeometry
+            # img, bbox, bbox unoverlap, increment, bbox pxl, extent = x_mini & y_maxi
+            sdata= [[[i],[],[],[],[],[]] for i in range(int((ngridx+1)*(ngridy+1)))] 
+            nimg=0
+            nite=1
+
+            for a in range(0,len(gridy),2+int(ngridx)*ov_iter):
+                for i in range(0+a,2+int(ngridx)*ov_iter+a,2):
+                    
+                    if nite==1:
+                        sdata[nimg][1].extend([QgsPointXY(gridx[i],gridy[i]),QgsPointXY(gridx[i+1],gridy[i+1])])
+                        sdata[nimg][2].extend([QgsPointXY(gridx[i]+tx_sup_gri*len_case_geoX,gridy[i]-tx_sup_gri*len_case_geoY),\
+                        QgsPointXY(gridx[i+1]-tx_sup_gri*len_case_geoX,gridy[i+1]-tx_sup_gri*len_case_geoY)])
+                        sdata[nimg][3].extend([i,i+1])
+                        sdata[nimg][4].extend([grid_x_pxl[i],grid_x_pxl[i+1],grid_y_pxl[i]])
+                        sdata[nimg][5].extend([gridx[i],gridy[i]])
+                    else:
+                        sdata[nimg][1].extend([QgsPointXY(gridx[i+1],gridy[i+1]),QgsPointXY(gridx[i],gridy[i])])
+                        sdata[nimg][2].extend([QgsPointXY(gridx[i+1]-tx_sup_gri*len_case_geoX,gridy[i+1]+tx_sup_gri*len_case_geoY),\
+                        QgsPointXY(gridx[i]+tx_sup_gri*len_case_geoX,gridy[i]+tx_sup_gri*len_case_geoY)])
+                        sdata[nimg][3].extend([i,i+1])
+                        sdata[nimg][4].extend([grid_y_pxl[i+1]])
+                    
+                    nimg+=1
                 
                 if nite==1:
-                    data[nimg][1].extend([QgsPointXY(gridx[i],gridy[i]),QgsPointXY(gridx[i+1],gridy[i+1])])
-                    data[nimg][2].extend([QgsPointXY(gridx[i]+tx_sup_gri*len_case_geoX,gridy[i]-tx_sup_gri*len_case_geoY),\
-                    QgsPointXY(gridx[i+1]-tx_sup_gri*len_case_geoX,gridy[i+1]-tx_sup_gri*len_case_geoY)])
-                    data[nimg][3].extend([i,i+1])
-                    data[nimg][4].extend([grid_x_pxl[i],grid_x_pxl[i+1],grid_y_pxl[i]])
-                    data[nimg][5].extend([gridx[i],gridy[i]])
+                    nimg-=int(ngridx)+1
+                    nite=0
                 else:
-                    data[nimg][1].extend([QgsPointXY(gridx[i+1],gridy[i+1]),QgsPointXY(gridx[i],gridy[i])])
-                    data[nimg][2].extend([QgsPointXY(gridx[i+1]-tx_sup_gri*len_case_geoX,gridy[i+1]+tx_sup_gri*len_case_geoY),\
-                    QgsPointXY(gridx[i]+tx_sup_gri*len_case_geoX,gridy[i]+tx_sup_gri*len_case_geoY)])
-                    data[nimg][3].extend([i,i+1])
-                    data[nimg][4].extend([grid_y_pxl[i+1]])
-                
-                nimg+=1
-            
-            if nite==1:
-                nimg-=int(ngridx)+1
-                nite=0
-            else:
-                nite=1
+                    nite=1
+
+            if ns ==1:
+                data = [sdata[0]]
+            else: 
+                data.extend(sdata)
 
         #detecting 
         results=[]
         feedback.pushInfo("MaskR CNN detection...")
         
+
+        
         for i in range(len(data)):
             array_d = bands[ data[i][4][2]:data[i][4][3], data[i][4][0]:data[i][4][1], :]
-            array_d = bands[::-1, ::-1, :]
-
-            print("image ",i+1," on " ,len(data),". Shape: ",array_d.shape)
-            results.append(model.detect([array_d], verbose=0))
+            
+            prev_shape = array_d.shape[:2]
+            array_d = cv.resize( array_d, (max_dim_infer, max_dim_infer))
+            
+            feedback.pushInfo(f"image {str(i+1)} on {str(len(data))}. Shape: {str(array_d.shape)}")
+            r = self.call_inference(array_d, SA)
+            
+            mask_array = np.array(r[0]['masks'],dtype=np.uint8)
+            r[0]['masks'] = cv.resize( mask_array, prev_shape)
+            results.append(r)
         
         #mask --> SHP
         feedback.pushInfo("converting to vector")
@@ -443,7 +507,6 @@ class GALET_image(QgsProcessingAlgorithm):
         
         #cleaning polygons
         feedback.pushInfo("cleaning "+str(len(polygon))+" polygons")
-        feedback.pushInfo("remove doublons")
         center_p = []
         double_pol = []
         for i in range(len(polygon)):

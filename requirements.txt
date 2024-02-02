@@ -4,11 +4,9 @@ Pillow
 cython
 matplotlib
 scikit-image
-tensorflow-gpu<2.11
-keras
 opencv-python
 imgaug
 IPython[all]
-rasterio
-rtree
-shapely
+python=3.10.13
+cudatoolkit=11.2
+cudnn
