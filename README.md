@@ -22,14 +22,16 @@ This installation procedure is based upon Conda.
 conda create -n galet_server python=3.9
 conda activate galet_server
 ```
-**You need every of the following steps to be performed under the newly created galet_server conda environment**
+**You need every of the following steps to be performed under the newly created *galet_server* conda environment**
 
 2 - _skip this section if you don't want to, or can't run GALET on GPU_
+
 Ensure that you have CUDA properly installed and setup by running
 ```bash
 nvidia-smi
 ```
 if this command is not recognized, run the CUDA installation again and/or set the CUDA_PATH variable in your environment. Use Google for further instructions. If you modify any environment value, including PATH or CUDA_PATH, you need to launch the Anaconda Prompt again so that it is taken into account. Don't forget to activate the galet server environment again if you ever happen to do so.
+
 Link your conda environment to CUDA. Versions used below are the last ones that allow native Windows GPU usage on Tensorflow.
 ```bash
 conda install -c conda-forge cudatoolkit=11.2 cudnn=8.1.0
@@ -50,12 +52,13 @@ Leave this window open as long as you need to use the Mask-R-CNN network. You ca
 ## QGis Client Installation
 
 ### With Conda
+
 1 - From a new Anaconda Prompt, create a conda environment (any Python version>=3.8 is suitable)
 ```bash
 conda create -n galet_qgis
 conda activate galet_qgis
 ```
-**You need every following step to be performed under the newly created galet_qgis conda environment**
+**You need every following step to be performed under the newly created *galet_qgis* conda environment**
 
 2 - Install qgis and the required client libraries by running
 ```bash
@@ -74,6 +77,7 @@ qgis
 2 - Within the client environment, launch QGis (3rd step in the QGis client installation section)
 
 3 - Once in qgis, open the processing tool box and add both scripts to the toolbox `Qgis_processing_IMAGE.py` and `Qgis_processing_ORTHO.py`.
+
 They will appear under Galet
 
 ![](img/Image2.png)
