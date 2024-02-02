@@ -24,20 +24,42 @@ from qgis.PyQt.QtCore import QVariant
 from osgeo import gdal, osr
 import numpy as np
 
-import rasterio
-from rasterio import features as rasterio_features
-from rasterio import Affine as A
-import warnings
-warnings.filterwarnings("ignore")
+import subprocess
+try: 
+    import rasterio
+    from rasterio import Affine as A
+    from rasterio import features as rasterio_features
+except:
+    subprocess.check_call(['python', '-m', 'pip', 'install', 'rasterio==1.3.9'])
+    import rasterio
+    from rasterio import Affine as A
+    from rasterio import features as rasterio_features
 
-import tensorflow as tf
+try : 
+    from shapely.geometry import box
+except:
+    subprocess.check_call(['python', '-m', 'pip', 'install', 'shapely'])
+    from shapely.geometry import box
 
-config = tf.compat.v1.ConfigProto()
-config.gpu_options.allow_growth = True
-session = tf.compat.v1.Session(config=config)
+try : 
+    from rtree import index
+except:
+    subprocess.check_call(['python', '-m', 'pip', 'install', 'rtree'])
+    from rtree import index
 
-from shapely.geometry import box
-from rtree import index
+try:
+    import cv2 as cv
+except:
+    subprocess.check_call(['python', '-m', 'pip', 'install', 'opencv-python==4.9.0'])
+    import cv2 as cv
+
+from pathlib import Path
+
+import socket
+import pickle
+
+import copy
+from itertools import chain
 
 class GALET_Georef(QgsProcessingAlgorithm):
     
@@ -62,7 +84,9 @@ class GALET_Georef(QgsProcessingAlgorithm):
     DETECTION_NMS_THRESHOLD = 'DETECTION_NMS_THRESHOLD'
     PRE_NMS_LIMIT = 'PRE_NMS_LIMIT'
 
-    
+    HOST, PORT = "localhost", 9999
+    BUFF_SIZE = 65536
+
     def __init__(self):
         super().__init__()
         
@@ -175,7 +199,60 @@ class GALET_Georef(QgsProcessingAlgorithm):
             self.OUTPUT_MASK,
             self.tr('###########################################\nContour of identified grains')))
         
-             
+
+    def exchange_with_server(self, instructions_dict):
+        # send/receive data from conda env
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            # Connect to server and send data
+            sock.connect((self.HOST, self.PORT))
+            #pickled_dict = pickle.dumps()
+
+            print("sending data...")
+            sock.sendall(pickle.dumps(instructions_dict))
+            print("... data sent")
+
+            data = []
+            while True:
+                try :
+                    packet = sock.recv(self.BUFF_SIZE)
+                    if len(packet)<self.BUFF_SIZE:
+                        data.append(packet)
+                        break
+                    elif not packet:
+                        break
+                except : 
+                    break
+                data.append(packet)
+                time.sleep(0.001)
+                # set it only after the 1st receive so that it wan wait for the computation to happen
+                sock.settimeout(1.)
+                  
+            received_response = pickle.loads(b"".join(data))
+
+            return received_response
+        return {'status':'Connection failed'}
+
+    def call_inference(self, img, SA):
+        imshared, shm_img, transfer_dict = SA.shareNPArray(img)
+
+        # Send it to the server and wait for the response
+        response_dict = self.exchange_with_server({'infer':transfer_dict})
+
+        shared_msks, shm_msks = SA.readSharedNPArray(response_dict['masks'])
+        shared_rois, shm_rois = SA.readSharedNPArray(response_dict['rois'])
+        shared_cids, shm_cids = SA.readSharedNPArray(response_dict['class_ids'])
+        shared_scrs, shm_scrs = SA.readSharedNPArray(response_dict['scores'])
+
+        # put them in the correct data structure
+        result = [{'masks':copy.deepcopy(shared_msks), 'rois':copy.deepcopy(shared_rois), 'class_ids':copy.deepcopy(shared_cids), 'scores':copy.deepcopy(shared_scrs)}]
+
+        # release the shared memory
+        SA.closeSharedNPArrays([shm_msks, shm_rois, shm_cids, shm_scrs, shm_img], unlink=True)
+
+        return result
+
+
     def processAlgorithm(self, parameters, context, feedback):
             
         ############################################################
@@ -230,54 +307,31 @@ class GALET_Georef(QgsProcessingAlgorithm):
         #########################
         
         path_h5_file = os.path.abspath(input_weight) #ficher h5 as path
-        from pathlib import Path
+
         mrcnn_path = str(Path(path_h5_file).parents[2]) #dossier Mask_RCNN
         
         #mrcnn
         sys.path.append(mrcnn_path) #librairie mrcnn local
-        import mrcnn.model as modellib
-        #from samples.grain import grain #config model
-        import grain #config model
-        
-        config = grain.CustomConfig() #config dans grain.py
-        
-        #on change quelques paramètres suivant l'utilisateur
-        config_a = self.parameterAsInt(parameters, self.IMAGE_MAX_DIM, context)
-        config_b = self.parameterAsInt(parameters, self.DETECTION_MAX_INSTANCES, context)
-        config_c = self.parameterAsDouble(parameters, self.RPN_NMS_THRESHOLD, context)
-        config_d = self.parameterAsInt(parameters, self.POST_NMS_ROIS_INFERENCE, context)
-        config_e = self.parameterAsDouble(parameters, self.DETECTION_NMS_THRESHOLD, context)
-        config_f = self.parameterAsInt(parameters, self.PRE_NMS_LIMIT, context)
-        
-        class InferenceConfig(config.__class__):
-                IMAGE_MAX_DIM = config_a #default 1024
-                DETECTION_MAX_INSTANCES = config_b  #Max number of final detections default 100
-                RPN_NMS_THRESHOLD = config_c # Non-max suppression threshold to filter RPN proposals. default 0.7
-                POST_NMS_ROIS_INFERENCE = config_d # ROIs kept after non-maximum suppression (training and inference) default 1000
-                DETECTION_NMS_THRESHOLD = config_e # Non-maximum suppression threshold for detection default 0.3
-                PRE_NMS_LIMIT = config_f # ROIs kept after tf.nn.top_k and before non-maximum suppression default 6000
-                DETECTION_MIN_CONFIDENCE = 0.001
-                IMAGE_RESIZE_MODE = "square"
-                #RPN_ANCHOR_SCALES = (8,16, 32, 64, 128)
-        
-        config = InferenceConfig()
-        
-        
-        class_names = ['BG', 'grain']
-        model_dir = os.path.join(mrcnn_path, "logs")
+        import ShareArrays as SA
+
+        max_dim_infer = self.parameterAsInt(parameters, self.IMAGE_MAX_DIM, context)
+        config_dict = {
+            'config': {
+                self.IMAGE_MAX_DIM           : max_dim_infer,
+                self.DETECTION_MAX_INSTANCES : self.parameterAsInt(parameters, self.DETECTION_MAX_INSTANCES, context),
+                self.RPN_NMS_THRESHOLD       : self.parameterAsDouble(parameters, self.RPN_NMS_THRESHOLD, context),
+                self.POST_NMS_ROIS_INFERENCE : self.parameterAsInt(parameters, self.POST_NMS_ROIS_INFERENCE, context),
+                self.DETECTION_NMS_THRESHOLD : self.parameterAsDouble(parameters, self.DETECTION_NMS_THRESHOLD, context),
+                self.PRE_NMS_LIMIT           : self.parameterAsInt(parameters, self.PRE_NMS_LIMIT, context),
+                'path_h5_file'          : path_h5_file
+                }
+            }
         
         #chargement du modele
-        feedback.pushInfo("Chargement du modéle...")
-        
-        from keras.backend import clear_session
-        clear_session()
-        model = modellib.MaskRCNN(mode="inference", model_dir = model_dir, config=config)
-        #model.load_weights(path_h5_file, by_name=True, exclude=[ "mrcnn_class_logits", "mrcnn_bbox_fc", "mrcnn_bbox", "mrcnn_mask"])
-        model.load_weights(path_h5_file, by_name=True)
-        # model.keras_model._make_predict_function()
-        
-        
-        
+        feedback.pushInfo("Model loading...")
+        ret_dict = self.exchange_with_server(config_dict)
+        feedback.pushInfo(ret_dict['status'])
+
         
         #total des polys a nettoyé si plusieurs cut
         TOTAL_polys_toclean=[]
@@ -328,7 +382,7 @@ class GALET_Georef(QgsProcessingAlgorithm):
             
             
             #creation d'une grille de x par x pixel
-            feedback.pushInfo("creation de la grille sur la zone n° " + str(ite_1+1))
+            feedback.pushInfo("Creating grid n° " + str(ite_1+1))
             feedback.pushInfo("meshing...")
             
             
@@ -394,9 +448,6 @@ class GALET_Georef(QgsProcessingAlgorithm):
             grid_y_pxl = [round(y_pxl_tlc+(y0-gridy[i])/rast_pxlY) for i in range(len(gridy))]
             
             #converting to QgsGeometry
-            feedback.pushInfo("conversion des points en Geom")
-            
-            
             data= [[[i],[],[],[],[],[]] for i in range(int(ngridx*ngridy))] #img, bbox, bbox unoverlap, increment, bbox en pxl, extent = xmini et y maxi
             nimg=0
             nite=1
@@ -429,7 +480,7 @@ class GALET_Georef(QgsProcessingAlgorithm):
 
 
             #suppresion des couches qui ne superposent ap'
-            feedback.pushInfo("removing non overlaping grid")
+            feedback.pushInfo("Removing non overlaping grid")
             cut_geom = cut_features.geometry()
            
             keep_i = []
@@ -452,11 +503,15 @@ class GALET_Georef(QgsProcessingAlgorithm):
                 array_d = bands[clean_data[i][4][2]:clean_data[i][4][3],\
                     clean_data[i][4][0]:clean_data[i][4][1],:]
                 
+                prev_shape = array_d.shape[:2]
+                array_d = cv.resize( array_d, (max_dim_infer, max_dim_infer))
+            
                 feedback.pushInfo("image "+str(i+1)+" on " +str(len(clean_data))+". Shape: "+str(array_d.shape))
-                res = model.detect([array_d], verbose=0)
-                results.append(res)
-
-                feedback.pushInfo("Found "+str( res[0]['masks'].shape[2])+" pebbles")
+                r = self.call_inference(array_d, SA)
+            
+                mask_array = np.array(r[0]['masks'],dtype=np.uint8)
+                r[0]['masks'] = cv.resize( mask_array, prev_shape)
+                results.append(r)
             
             #mask --> SHP
             feedback.pushInfo("converting to vector")
@@ -519,110 +574,54 @@ class GALET_Georef(QgsProcessingAlgorithm):
             mer_se = [list(item) for item in set(tuple(row) for row in mer_so)]
             
             #merging polygons
-            feedback.pushInfo("merging  les doublons")
-            to_del=[]
-            for id in mer_se:
-                polys[id[0]]=QgsGeometry.unaryUnion([polys[id[0]],polys[id[1]]])
-                to_del.append(id[1])
+            feedback.pushInfo("merging duplicates")
+
+            class UnionFind:
+                def __init__(self):
+                    self.parent = {}
+
+                def find(self, u):
+                    if u != self.parent.setdefault(u, u):
+                        self.parent[u] = self.find(self.parent[u])
+                    return self.parent[u]
+
+                def union(self, u, v):
+                    root_u, root_v = self.find(u), self.find(v)
+                    if root_u != root_v:
+                        self.parent[root_u] = root_v
+
+            def merge_lists_with_common_ids(id_list):
+                union_find = UnionFind()
+
+                for ids in id_list:
+                    for id_ in ids:
+                        union_find.find(id_)
+
+                for ids in id_list:
+                    union_find.union(ids[0], ids[1])
+
+                merged_lists = {}
+                for id_ in union_find.parent.keys():
+                    root = union_find.find(id_)
+                    if root not in merged_lists:
+                        merged_lists[root] = [id_]
+                    else:
+                        merged_lists[root].append(id_)
+
+                return list(merged_lists.values())
+
+            to_del= list(chain.from_iterable(mer_se))
+            to_merge_comb = merge_lists_with_common_ids(to_merge)
+            to_ext = []
+            for list_comb_ids in to_merge_comb:
+                list_comb = [ polys[i] for i in list_comb_ids ]
+                to_ext.append( QgsGeometry.unaryUnion( list_comb ) )
                 
             polygon_cleany = [polys[i] for i in range(len(polys)) if i not in to_del]
-            
-            
-            
-            
-            if CUT.featureCount() >1:
-                feedback.pushInfo("adding result..")
-                TOTAL_polys_toclean.extend(polygon_cleany)
-            else:
-                feedback.pushInfo("writing file...")
-                for poly in polygon_cleany:
-                    f = QgsFeature()
-                    f.setGeometry(poly)
-                    dist = 2*np.sqrt(poly.closestSegmentWithContext(poly.centroid().asPoint())[0])
-                    if dist > 2*rast_pxlX:
-                        f.setAttributes([str(dist)])
-                        Mask_shp.addFeature(f , QgsFeatureSink.FastInsert)
-            
-        #si la zone est fractionné nettoie tout ça
-        if CUT.featureCount() >1:
-            #!!! le nettoyage se fait sur bbox : faire des traits droit :3
-            #buff les zones sur 20 pxl
-            
-            feedback.pushInfo("multiple zone provided")
-            feedback.pushInfo("calculating buffer")
-            list_buff = []
-            for cut_feat in CUT.getFeatures():
-                list_buff.append(cut_feat.geometry().buffer(250*rast_pxlX,4))
-            
-            #calculating crossed buffer
-            buff_cross_id = [[a,b] for a in range(len(list_buff)) for b in range(len(list_buff)) \
-                if list_buff[a].intersects(list_buff[b]) and not list_buff[a].equals(list_buff[b])]
-            
-            #set
-            buff_so = [sorted(sub) for sub in buff_cross_id]
-            buff_se = [list(item) for item in set(tuple(row) for row in buff_so)]
+            polygon_cleany.extend(to_ext)
 
-            #to geom
-            buff_cross= [list_buff[a[0]].intersection(list_buff[a[1]]) for a in buff_se]
-            
-            #idx
-            feedback.pushInfo("creation d'un index spatial")
-             #init Rtree
-            idx_rtree_bis = index.Index()
-            
-            #convert grain to shapely box
-            box_shply_total = [box(u.boundingBox().xMinimum(),u.boundingBox().yMinimum(),\
-            u.boundingBox().xMaximum(),u.boundingBox().yMaximum()) for u in TOTAL_polys_toclean]
-            
-            #convert buffer to shapely box
-            box_shply_buff = [box(u.boundingBox().xMinimum(),u.boundingBox().yMinimum(),\
-                u.boundingBox().xMaximum(),u.boundingBox().yMaximum()) for u in buff_cross]
-            
-            # Populate R-tree index 
-            for pos, cell in enumerate(box_shply_total):
-                idx_rtree_bis.insert(pos, cell.bounds)
-
-            # Loop through each 
-            list_comp_id=[]
-            for poly in box_shply_buff:
-                #a -> liste des grains dans un buffer
-                a=list(idx_rtree_bis.intersection(poly.bounds))
-                list_comp_id.extend(a)
-                
-            #loop sur les grains des buffers
-            shpy_on_buffer=[box_shply_total[id_li] for id_li in list_comp_id]
-                
-            list_comp_id_bis=[]
-            for poly in shpy_on_buffer:
-                a=list(idx_rtree_bis.intersection(poly.bounds))
-                list_comp_id_bis.append(a)
-            
-            feedback.pushInfo("computing IoU")
-            
-            to_merge=[[id_1,id_2] for id in range(len(list_comp_id_bis)) for id_1 in list_comp_id_bis[id] for id_2 in list_comp_id_bis[id]\
-                if (len(list_comp_id_bis[id])>1 and id_1!=id_2 and (\
-                    TOTAL_polys_toclean[id_1].boundingBox().intersect(TOTAL_polys_toclean[id_2].boundingBox()).area()\
-                    /TOTAL_polys_toclean[id_1].boundingBox().area()>tx_sup_grain or \
-                    TOTAL_polys_toclean[id_1].boundingBox().intersect(TOTAL_polys_toclean[id_2].boundingBox()).area()\
-                    /TOTAL_polys_toclean[id_2].boundingBox().area()>tx_sup_grain))]
-            
-            #sort and set
-            mer_so = [sorted(sub) for sub in to_merge]
-            mer_se = [list(item) for item in set(tuple(row) for row in mer_so)]
-            
-    
-            #merging polygons
-            feedback.pushInfo("merging  les doublons")
-            to_del=[]
-            for id in mer_se:
-                TOTAL_polys_toclean[id[0]]=QgsGeometry.unaryUnion([TOTAL_polys_toclean[id[0]],TOTAL_polys_toclean[id[1]]])
-                to_del.append(id[1])
-                
-            polygon_cleany = [TOTAL_polys_toclean[i] for i in range(len(TOTAL_polys_toclean)) if i not in to_del]
-            
             
             feedback.pushInfo("writing file...")
-        
             for poly in polygon_cleany:
                 f = QgsFeature()
                 f.setGeometry(poly)
@@ -630,5 +629,6 @@ class GALET_Georef(QgsProcessingAlgorithm):
                 if dist > 2*rast_pxlX:
                     f.setAttributes([str(dist)])
                     Mask_shp.addFeature(f , QgsFeatureSink.FastInsert)
+            
                     
         return{}
