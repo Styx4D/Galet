@@ -11,7 +11,7 @@ Our approach is a local Server-Client Implementation. The user starts a Server (
 1 - Clone this repository
 
 2 - Download the pretrained weight [here](https://drive.google.com/file/d/18kRFTrrsK91y44fTgpr7q9e4fMKIAroQ/view?usp=sharing) and put them into the folder GALET_RCNN_V3/weights/
-
+(you need to create the _weights_ folder)
 
 ## Mask-R-CNN Server installation
 
