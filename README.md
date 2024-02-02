@@ -21,6 +21,7 @@ This installation procedure is based upon Conda.
 conda create -n galet_server python=3.9
 conda activate galet_server
 ```
+**You need every following step to be performed under the newly created galet_server conda environment**
 
 2 - (skip this section if you don't want to, or can't run GALET on GPU)
 Ensure that you have CUDA properly installed and setup by running
@@ -53,6 +54,7 @@ Leave this window open as long as you need to use the Mask-R-CNN network. You ca
 conda create -n galet_qgis
 conda activate galet_qgis
 ```
+**You need every following step to be performed under the newly created galet_qgis conda environment**
 
 2 - Install qgis and the required client libraries by running
 ```bash
