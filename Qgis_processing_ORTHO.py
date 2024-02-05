@@ -61,6 +61,8 @@ import pickle
 import copy
 from itertools import chain
 
+# from icecream import ic
+
 class GALET_Georef(QgsProcessingAlgorithm):
     
     #INPUT
@@ -628,14 +630,114 @@ class GALET_Georef(QgsProcessingAlgorithm):
             polygon_cleany.extend(to_ext)
 
             
-            feedback.pushInfo("writing file...")
-            for poly in polygon_cleany:
-                f = QgsFeature()
-                f.setGeometry(poly)
-                dist = 2*np.sqrt(poly.closestSegmentWithContext(poly.centroid().asPoint())[0])
-                if dist > 2*rast_pxlX:
-                    f.setAttributes([str(dist)])
-                    Mask_shp.addFeature(f , QgsFeatureSink.FastInsert)
+            if CUT.featureCount() >1:
+                feedback.pushInfo("adding result..")
+                TOTAL_polys_toclean.extend(polygon_cleany)
+            else:
+                feedback.pushInfo("writing file...")
+                for poly in polygon_cleany:
+                    f = QgsFeature()
+                    f.setGeometry(poly)
+                    dist = 2*np.sqrt(poly.closestSegmentWithContext(poly.centroid().asPoint())[0])
+                    if dist > 2*rast_pxlX:
+                        f.setAttributes([str(dist)])
+                        Mask_shp.addFeature(f , QgsFeatureSink.FastInsert)
+        
+        # Here if there is more than 1 cut zones
+        # we will check if there's overlap, if so we clean overlapping grains
+        if CUT.featureCount() > 1:
+            feedback.pushInfo("multiple zone provided")
+            feedback.pushInfo("calculating buffer")
+            list_buff = []
+            for cut_feat in CUT.getFeatures():
+                list_buff.append(cut_feat.geometry().buffer(250*rast_pxlX,4))
             
-                    
+            #calculating crossed buffer
+            buff_cross_id = [[a,b] for a in range(len(list_buff)) for b in range(len(list_buff)) \
+                if list_buff[a].intersects(list_buff[b]) and not list_buff[a].equals(list_buff[b])]
+            
+            if any( buff_cross_id ):
+                #set
+                buff_so = [sorted(sub) for sub in buff_cross_id]
+                buff_se = [list(item) for item in set(tuple(row) for row in buff_so)]
+
+                #to geom
+                buff_cross= [list_buff[a[0]].intersection(list_buff[a[1]]) for a in buff_se]
+
+                #idx
+                feedback.pushInfo("Creating Spatial Index")
+                #init Rtree
+                idx_rtree_bis = index.Index()
+            
+                #convert grain to shapely box
+                box_shply_total = [box(u.boundingBox().xMinimum(),u.boundingBox().yMinimum(),\
+                u.boundingBox().xMaximum(),u.boundingBox().yMaximum()) for u in TOTAL_polys_toclean]
+                
+                #convert buffer to shapely box
+                box_shply_buff = [box(u.boundingBox().xMinimum(),u.boundingBox().yMinimum(),\
+                    u.boundingBox().xMaximum(),u.boundingBox().yMaximum()) for u in buff_cross]
+                
+                # Populate R-tree index for all grains
+                for pos, cell in enumerate(box_shply_total):
+                    idx_rtree_bis.insert(pos, cell.bounds)
+
+                # Loop through each 
+                list_comp_id=[]
+                for poly in box_shply_buff:
+                    #a -> list grains on CUT intersection buffer
+                    a=list(idx_rtree_bis.intersection(poly.bounds))
+                    list_comp_id.append(a)
+
+                # collect grains on overlap zones
+                shpy_on_buffer=[[box_shply_total[id_li] for id_li in list_comp_id_ite] for list_comp_id_ite in list_comp_id]
+                
+                # list overlaping grains on themself
+                list_comp_id_bis=[]
+                for poly_list in shpy_on_buffer:
+                    for poly in poly_list:
+                        a=list(idx_rtree_bis.intersection(poly.bounds))
+                        list_comp_id_bis.append(a)
+                feedback.pushInfo("computing IoU")
+                to_merge = [[id_1,id_2] for id in range(len(list_comp_id_bis)) for id_1 in list_comp_id_bis[id] for id_2 in list_comp_id_bis[id]\
+                        if (len(list_comp_id_bis[id])>1 and id_1!=id_2 and (\
+                        TOTAL_polys_toclean[id_1].intersection(TOTAL_polys_toclean[id_2]).area()\
+                        /TOTAL_polys_toclean[id_1].area()>tx_sup_grain or \
+                        TOTAL_polys_toclean[id_1].intersection(TOTAL_polys_toclean[id_2]).area()\
+                        /TOTAL_polys_toclean[id_2].area()>tx_sup_grain))]
+                
+                 #merging polygons
+                feedback.pushInfo("merging duplicates")
+               
+
+                to_del= list(chain.from_iterable(to_merge))
+                to_merge_comb = merge_lists_with_common_ids(to_merge)
+                to_ext = []
+                for list_comb_ids in to_merge_comb:
+                    list_comb = [ TOTAL_polys_toclean[i] for i in list_comb_ids ]
+                    to_ext.append( QgsGeometry.unaryUnion( list_comb ) )
+                
+
+                polygon_cleany = [TOTAL_polys_toclean[i] for i in range(len(TOTAL_polys_toclean)) if i not in to_del]
+                polygon_cleany.extend(to_ext)
+
+                feedback.pushInfo("writing file...")
+        
+                for poly in polygon_cleany:
+                    f = QgsFeature()
+                    f.setGeometry(poly)
+                    dist = 2*np.sqrt(poly.closestSegmentWithContext(poly.centroid().asPoint())[0])
+                    if dist > 2*rast_pxlX:
+                        f.setAttributes([str(dist)])
+                        Mask_shp.addFeature(f , QgsFeatureSink.FastInsert)
+            else:
+                for poly in TOTAL_polys_toclean:
+                    f = QgsFeature()
+                    f.setGeometry(poly)
+                    dist = 2*np.sqrt(poly.closestSegmentWithContext(poly.centroid().asPoint())[0])
+                    if dist > 2*rast_pxlX:
+                        f.setAttributes([str(dist)])
+                        Mask_shp.addFeature(f , QgsFeatureSink.FastInsert)
+            
+
+                 
         return{}
