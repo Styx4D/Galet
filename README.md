@@ -70,6 +70,17 @@ conda install -c conda-forge qgis Pillow rasterio shapely opencv rtree
 qgis
 ```
 
+### With OsGeo
+
+1 - Install Qgis with the official OsGeo Installer
+
+2 - Run The OSGeo4WShell and run
+```bash
+pip install Pillow rasterio shapely opencv rtree
+```
+
+3 - Launch QGis
+
 
 ## How to use
 1 - Within the server environment, launch the Mask-R-CNN server (4th step in the server installation section)
