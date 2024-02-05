@@ -295,7 +295,7 @@ class GALET_image(QgsProcessingAlgorithm):
         
         im_file = RAS_IM.source()
         false_len = SCALE_LINE.getFeature(1).geometry().length()
-        scale =  SCALE_LEN /false_len
+        scale =  abs(SCALE_LEN /false_len)
         
         im = Image.open(im_file)
         im.save(OUT_RAS, 'TIFF')
@@ -408,7 +408,7 @@ class GALET_image(QgsProcessingAlgorithm):
                 
             #last one pour tout recouvrir
             points_x.extend([x_tlc+cut_width-len_case_geoX,x_tlc+cut_width])
-            points_y.extend([y_tlc-cut_height+len_case_geoY,y_tlc-cut_width])
+            points_y.extend([y_tlc-cut_height+len_case_geoY,y_tlc-cut_height])
             
             #mesh&flat
             gridx, gridy = np.meshgrid(points_x,points_y)
