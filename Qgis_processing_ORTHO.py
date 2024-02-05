@@ -573,10 +573,14 @@ class GALET_Georef(QgsProcessingAlgorithm):
                 list_comp_id.append(a)
             
             feedback.pushInfo("computing IoU")
+            # to_merge=[[id,idd] for id in range(len(list_comp_id)) for idd in list_comp_id[id]\
+            #     if (len(list_comp_id[id])>1 and (idd!=id) and (\
+            #         polys_bb[id].intersect(polys_bb[idd]).area()/polys_bb[id].area()>tx_sup_grain or \
+            #         polys_bb[id].intersect(polys_bb[idd]).area()/polys_bb[idd].area()>tx_sup_grain))]
             to_merge=[[id,idd] for id in range(len(list_comp_id)) for idd in list_comp_id[id]\
                 if (len(list_comp_id[id])>1 and (idd!=id) and (\
-                    polys_bb[id].intersect(polys_bb[idd]).area()/polys_bb[id].area()>tx_sup_grain or \
-                    polys_bb[id].intersect(polys_bb[idd]).area()/polys_bb[idd].area()>tx_sup_grain))]
+                    polys[id].intersection(polys[idd]).area()/polys[id].area()>tx_sup_grain or \
+                    polys[id].intersection(polys[idd]).area()/polys[idd].area()>tx_sup_grain))]
             
             #sort and set
             mer_so = [sorted(sub) for sub in to_merge]
