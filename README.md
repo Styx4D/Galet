@@ -30,7 +30,7 @@ Ensure that you have CUDA properly installed and setup by running
 ```bash
 nvidia-smi
 ```
-if this command is not recognized, run the CUDA installation again and/or set the CUDA_PATH variable in your environment. Use Google for further instructions. If you modify any environment value, including PATH or CUDA_PATH, you need to launch the Anaconda Prompt again so that it is taken into account. Don't forget to activate the galet server environment again if you ever happen to do so.
+if this command is not recognized, run the CUDA installation again and/or set the CUDA_PATH variable in your environment. Use Google for further instructions. If you modify any environment value, including PATH or CUDA_PATH, you need to launch the Anaconda Prompt again so that changes are taken into account. Don't forget to activate the galet server environment again if you ever happen to do so.
 
 Link your conda environment to CUDA. Versions used below are the last ones that allow native Windows GPU usage on Tensorflow.
 ```bash
@@ -46,7 +46,11 @@ pip install -r requirements-server.txt
 ```bash
 python Galet_Server.py
 ```
-Leave this window open as long as you need to use the Mask-R-CNN network. You can shut down the server by hitting Ctrl+C. Don't forget that every time you want to start the server, you need to activate the galet server conda environment.
+Leave this window open as long as you need to use the Mask-R-CNN network. You can shut down the server by hitting Ctrl+C. Don't forget that every time you want to start the server, you need to activate the galet server conda environment:
+```bash
+conda activate galet_server
+python Galet_Server.py
+```
 
 
 ## QGis Client Installation
