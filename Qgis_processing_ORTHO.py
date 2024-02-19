@@ -170,28 +170,28 @@ class GALET_Georef(QgsProcessingAlgorithm):
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.RPN_NMS_THRESHOLD,
-                self.tr('Suppression threshold (0 to 1) for RPN'),
+                self.tr('Suppression threshold (0 to 1) for RPN NMS'),
                 QgsProcessingParameterNumber.Double,
                 defaultValue=0.7))
                 
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.POST_NMS_ROIS_INFERENCE,
-                self.tr('Maximum number of ROI after RPN filter'),
+                self.tr('Maximum number of ROI after RPN NMS filter'),
                 QgsProcessingParameterNumber.Integer,
                 defaultValue=2000))
                 
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.DETECTION_NMS_THRESHOLD,
-                self.tr('Suppression threshold (0 to 1) for NMS'),
+                self.tr('Suppression threshold (0 to 1) pre NMS on objectness score'),
                 QgsProcessingParameterNumber.Double,
                 defaultValue=0.3))
                 
         self.addParameter(
             QgsProcessingParameterNumber(
                 self.PRE_NMS_LIMIT,
-                self.tr('Maximum ROI before NMS filter.'),
+                self.tr('Maximum ROI after pre NMS score filter.'),
                 QgsProcessingParameterNumber.Integer,
                 defaultValue=9000))
         
