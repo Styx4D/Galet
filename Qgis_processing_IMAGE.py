@@ -14,7 +14,10 @@ from qgis.core import (QgsFeatureSink,
                        QgsWkbTypes,
                        QgsGeometry,
                        QgsProcessingParameterFile,
-                       QgsPointXY)
+                       QgsPointXY,
+                       QgsCoordinateReferenceSystem,
+                       QgsUnitTypes,
+                       QgsProject)
 from qgis import processing
 
 import os, tempfile
@@ -291,12 +294,28 @@ class GALET_image(QgsProcessingAlgorithm):
         tx_sup_gri = self.parameterAsDouble(parameters, self.CUT_SUPERPOS, context)
         tx_sup_grain = self.parameterAsDouble(parameters, self.FILTRE_REC_RESULT, context)
         
+        # check for CRS
+        user_crs=QgsCoordinateReferenceSystem(QgsProject.instance().crs().authid())
+        map_units_type = QgsUnitTypes.encodeUnit(user_crs.mapUnits())
+        image_units_type = QgsUnitTypes.encodeUnit(RAS_IM.crs().mapUnits())
+        scale_units_type = QgsUnitTypes.encodeUnit(SCALE_LINE.crs().mapUnits())
+
+        if map_units_type == 'degrees':
+            feedback.pushInfo("Warning : You're working on degrees units")
+            feedback.pushInfo(f"Reprojecting layers from {user_crs.authid()} to EPSG 2154")
+            metric_crs = QgsCoordinateReferenceSystem(2154)
+            RAS_IM.setCrs(metric_crs)
+            SCALE_LINE.setCrs(metric_crs)
+            QgsProject.instance().setCrs(metric_crs)
+    
+    
         #georeferencement de l'image
         
         im_file = RAS_IM.source()
-        false_len = SCALE_LINE.getFeature(1).geometry().length()
+        false_len = [i.geometry().length() for i in SCALE_LINE.getFeatures()][0]
         scale =  abs(SCALE_LEN /false_len)
-        
+        # print(false_len)
+        # print(scale)
         im = Image.open(im_file)
         im.save(OUT_RAS, 'TIFF')
 
