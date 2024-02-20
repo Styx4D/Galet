@@ -30,10 +30,12 @@ import subprocess
 try: 
     import rasterio
     from rasterio import Affine as A
+    from rasterio import features as rasterio_features
 except:
     subprocess.check_call(['python', '-m', 'pip', 'install', 'rasterio==1.3.9'])
     import rasterio
     from rasterio import Affine as A
+    from rasterio import features as rasterio_features
 
 try:
     from PIL import Image
@@ -516,7 +518,7 @@ class GALET_image(QgsProcessingAlgorithm):
                     
                     mask_array = np.array(r['masks'][:, :, i],dtype=np.uint8)
                     #rasterio : (array, masque (non digitalisation de 0), transformation)
-                    for vec in rasterio.features.shapes(mask_array, mask_array,
+                    for vec in rasterio_features.shapes(mask_array, mask_array,
                         transform=A.translation(data[id_data][5][0],
                         data[id_data][5][1]) * A.scale(rast_pxlX, -rast_pxlY)):
                         
