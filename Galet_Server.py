@@ -113,7 +113,16 @@ class NetworkMaskRCNNHandler(socketserver.BaseRequestHandler):
 		#detection des mask
 		results = self.model.detect([bands], verbose=1)
 
-		print("detected particles number : " + str(results[0]['masks'].shape[2]))
+		particles_number = results[0]['masks'].shape[2]
+
+		print("detected particles number : " + str(particles_number))
+
+		if particles_number==0:
+			# we have to set an exception there because the ShareArray system won't work with 0-byte sized objects
+			whole_dict = { 'no_detection': True }
+			pickled_results = pickle.dumps(whole_dict)
+			self.request.sendall(pickled_results)
+			return
 
 		print(results[0].keys())
 

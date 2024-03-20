@@ -251,6 +251,9 @@ class GALET_image(QgsProcessingAlgorithm):
         # Send it to the server and wait for the response
         response_dict = self.exchange_with_server({'infer':transfer_dict})
 
+        if 'no_detection' in response_dict:
+            return []
+
         shared_msks, shm_msks = SA.readSharedNPArray(response_dict['masks'])
         shared_rois, shm_rois = SA.readSharedNPArray(response_dict['rois'])
         shared_cids, shm_cids = SA.readSharedNPArray(response_dict['class_ids'])
@@ -493,6 +496,9 @@ class GALET_image(QgsProcessingAlgorithm):
             ret = cv.resize(arr[:,:,:accepted_depth], new_size)
             for i in range(accepted_depth,arr.shape[2],accepted_depth):
                 ret = np.concatenate((ret, cv.resize(arr[:,:,i:min(i+accepted_depth,arr.shape[2])], new_size)), axis=2)
+            if len(ret.shape)==2:
+                # ensure that the output is the same number of channels than the input
+                return ret[:,:,np.newaxis]
             return ret
         
         for i in range(len(data)):
@@ -503,6 +509,11 @@ class GALET_image(QgsProcessingAlgorithm):
             
             feedback.pushInfo(f"image {str(i+1)} on {str(len(data))}. Shape: {str(array_d.shape)}")
             r = self.call_inference(array_d, SA)
+
+            if len(r)==0:
+                # no detection
+                results.append([])
+                continue
             
             mask_array = np.array(r[0]['masks'],dtype=np.uint8)
             r[0]['masks'] = resize_any_depth( mask_array, prev_shape)
