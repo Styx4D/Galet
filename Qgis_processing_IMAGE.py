@@ -309,11 +309,13 @@ class GALET_image(QgsProcessingAlgorithm):
             feedback.pushInfo("Warning : You're working on degrees units")
             feedback.pushInfo(f"Reprojecting layers from {user_crs.authid()} to EPSG 2154")
             metric_crs = QgsCoordinateReferenceSystem(2154)
-            RAS_IM.setCrs(metric_crs)
-            SCALE_LINE.setCrs(metric_crs)
-            QgsProject.instance().setCrs(metric_crs)
-    
-    
+        else:
+            metric_crs = user_crs
+          
+        RAS_IM.setCrs(metric_crs)
+        SCALE_LINE.setCrs(metric_crs)
+        QgsProject.instance().setCrs(metric_crs)
+      
         #georeferencement de l'image
         
         im_file = RAS_IM.source()
