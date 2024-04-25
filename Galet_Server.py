@@ -8,10 +8,7 @@ import socketserver
 
 mrcnn_path = "GALET_RCNN_V3/"
 
-#from pathlib import Path
-#mrcnn_path = str(Path(path_h5).parents[2])
-
-#detection
+#detection module
 sys.path.append(mrcnn_path) #librairie mrcnn local
 import mrcnn.model as modellib
 import grain #config model
@@ -40,15 +37,7 @@ class NetworkMaskRCNNHandler(socketserver.BaseRequestHandler):
 		def _HandlerCreator(request, client_address, server):
 			cls(request, client_address, server, *args, **kwargs)
 		return _HandlerCreator
-	#def __init__(self):
-	#	print('entered here')
-	#	self.config = grain.CustomConfig() #config dans grain.py
 
-	#	self.class_names = ['BG', 'grain_emousse', 'grain_anguleux']
-	#	self.model_dir = os.path.join(mrcnn_path, "weights")
-	#	print('went here too')
-	#	#super().__init__()
-	#	#self.init_model()
 
 	def handle(self):
 		#read_msg: bytes = b''
@@ -77,34 +66,6 @@ class NetworkMaskRCNNHandler(socketserver.BaseRequestHandler):
 		elif "infer" in instructions.keys():
 			self.infer(instructions)
 
-		# bands, existing_shm = SA.readSharedNPArray(loaded_data)
-
-		# #detection des mask
-		# results = self.model.detect([bands], verbose=1)
-
-		# print("detected particles number : " + str(results[0]['masks'].shape[2]))
-
-		# #print(results[0].keys())
-		# #print(results[0]['masks'].shape)
-		# #print(results[0]['rois'].shape)
-		# #print(results[0]['class_ids'].shape)
-		# #print(results[0]['scores'].shape)
-
-		# shared_msks, shm_msks, dict_msks = SA.shareNPArray(results[0]['masks'])
-		# shared_rois, shm_rois, dict_rois = SA.shareNPArray(results[0]['rois'])
-		# shared_cids, shm_cids, dict_cids = SA.shareNPArray(results[0]['class_ids'])
-		# shared_scrs, shm_scrs, dict_scrs = SA.shareNPArray(results[0]['scores'])
-
-		# whole_dict = { 'masks': dict_msks, 'rois': dict_rois, 'class_ids': dict_cids, 'scores': dict_scrs }
-
-		# pickled_results = pickle.dumps(whole_dict)
-		# self.request.sendall(pickled_results)
-
-		# existing_shm.close()
-		# shm_msks.close()
-		# shm_rois.close()
-		# shm_cids.close()
-		# shm_scrs.close()
 
 
 	def infer(self, instructions):
@@ -126,6 +87,7 @@ class NetworkMaskRCNNHandler(socketserver.BaseRequestHandler):
 
 		print(results[0].keys())
 
+		# sharing the results of the computation to QGis
 		shared_msks, shm_msks, dict_msks = SA.shareNPArray(results[0]['masks'])
 		shared_rois, shm_rois, dict_rois = SA.shareNPArray(results[0]['rois'])
 		shared_cids, shm_cids, dict_cids = SA.shareNPArray(results[0]['class_ids'])
@@ -138,8 +100,6 @@ class NetworkMaskRCNNHandler(socketserver.BaseRequestHandler):
 
 		pickled_results = pickle.dumps(whole_dict)
 		self.request.sendall(pickled_results)
-
-		#SA.closeSharedNPArrays([existing_shm,shm_msks,shm_rois,shm_cids,shm_scrs])
 
 
 
@@ -165,27 +125,22 @@ class NetworkMaskRCNNHandler(socketserver.BaseRequestHandler):
 		config = InferenceConfig()
 
 		model_dir = os.path.join(mrcnn_path, "weights")
-		self.model = modellib.MaskRCNN(mode="inference", model_dir=model_dir, config=config)
-		self.model.load_weights(config_values['path_h5_file'], by_name=True)
 
-		print("... Model configuration loaded")
+		try:
+			self.model = modellib.MaskRCNN(mode="inference", model_dir=model_dir, config=config)
+			self.model.load_weights(config_values['path_h5_file'], by_name=True)
+
+			print("\n... Model configuration loaded\n\n")
+		except:
+			# something wrong happened while loading the model, notify the server
+			print("\n----- ERROR -----\n")
+			print("Could not load the model weights. Please watch carefully the corresponding paths.\n")
+			self.request.sendall(pickle.dumps({'status':'model loading error'}))
+			return
 
 		# notify the client that the task has been performed
 		self.request.sendall(pickle.dumps({'status':'model loaded'}))
 
-
-	#def init_model(self, instructions_dict=None):
-	#	clear_session()
-	#	self.config = grain.CustomConfig() #config dans grain.py
-	#	self.class_names = ['BG', 'grain_emousse', 'grain_anguleux']
-	#	self.model_dir = os.path.join(mrcnn_path, "weights")
-	#	self.model = modellib.MaskRCNN(mode="inference", model_dir=self.model_dir, config=self.config)
-	#	self.model.load_weights(path_h5, by_name=True)
-	#	print("model loaded")
-
-	#def server_activate(self):
-	#	self.init_model()
-	#	super().server_activate()
 
 
 if __name__ == "__main__":
@@ -195,20 +150,40 @@ if __name__ == "__main__":
 	config = grain.CustomConfig() #config dans grain.py
 	class_names = ['BG', 'grain_emousse', 'grain_anguleux']
 	model_dir = os.path.join(mrcnn_path, "weights")
-	model = modellib.MaskRCNN(mode="inference", model_dir=model_dir, config=config)
-	model.load_weights(path_h5, by_name=True)
+	
+	try:
+		model = modellib.MaskRCNN(mode="inference", model_dir=model_dir, config=config)
+	except:
+		print("\n----- ERROR -----\n")
+		print("Could not load the model, please verify carefully the MRCNN weights path.")
+		print("Its expected location is the following: " + model_dir + "\n")
+		exit()
+
+	try:
+		model.load_weights(path_h5, by_name=True)
+	except:
+		print("\n----- ERROR -----\n")
+		print("Could not load the weights, please verify carefully the path and folder names.")
+		print("Weights should be located here: " + path_h5 + "\n")
+		exit()
+
 
 	shared_memory_space = []
 
-	print('model loaded')
+	print('Model loaded.')
 
 	# Create the server, binding to localhost on port 9999
 	with socketserver.TCPServer((HOST, PORT), NetworkMaskRCNNHandler.Creator(model, shared_memory_space)) as server:
 		# Activate the server; this will keep running until you
 		# interrupt the program with Ctrl-C
-		##NetworkMaskRCNNHandler.__init__(server)
-		#NetworkMaskRCNNHandler.init_model(server)
 
-		print('Server started')
+		print('\n\n\n----- GALET Server started. -----\n\nPress Ctrl+C to interrupt the server when you\'re done.\n\n')
 
-		server.serve_forever()
+		try:
+			server.serve_forever()
+		except KeyboardInterrupt:
+			pass
+
+		print("Goodbye!")
+		server.server_close()
+		
