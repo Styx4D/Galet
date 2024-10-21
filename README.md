@@ -1,6 +1,8 @@
 # Galet
 Official repository of [GALET : A Deep Learning Image Segmentation Model for Drone-Based Grain Size Analysis of Gravel Bars](https://www.researchgate.net/publication/362231914_GALET_A_deep_learning_image_segmentation_model_for_drone-based_grain_size_analysis_of_gravel_bars)
 
+**This release is licensed for research, academic and educational purpose only. If you intend to make commercial use of GALET, please contact us.**
+
 The repository is based upon the implementation of  [Mask R CNN from Matterport](https://github.com/matterport/Mask_RCNN), modified to run on tensorflow 2.X.
 
 Our approach is a local Server-Client Implementation. The user starts a Server (Mask-R-CNN) designed to handle all of the image processing, while QGis is considered as a Client, and is used as both a GUI and the tool for exploiting segmentation results. This approach was driven by the difficulty of having QGis and TensorFlow working together properly into an unique Conda space. Please note that this is a localhost Client/Server approach. None of the data shared between environments is sent on Internet.
