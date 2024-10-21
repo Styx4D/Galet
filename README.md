@@ -104,5 +104,3 @@ They will appear under Galet
 
 ![](img/Image1.png)
 
-### Example for georeferenced data
-TODO : video
