@@ -44,6 +44,10 @@ conda install -c conda-forge cudatoolkit=11.2 cudnn=8.1.0
 pip install -r requirements-server.txt
 ```
 
+NOTES:
+- you may have to try different libraries versions and need to modify requirements-server.txt (use a simple text editor) to get this step working. For reference, we have included in this repository requirements-server-allversions.txt which we know to work for our computers under windows.
+- if you don't have a cuda-capable GPU, or if you have low GPU memory (under 8GB VRam), or if in the following steps you get Out Of Memory (OOM) errors, replace "tensorflow-gpu" by "tensorflow" in requirements-server.txt
+
 4 - From the root folder of the project, launch the server to verify that everything works as expected
 ```bash
 python Galet_Server.py

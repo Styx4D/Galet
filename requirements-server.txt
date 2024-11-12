@@ -1,6 +1,6 @@
 tensorflow-gpu<2.11
 keras
-numpy
+numpy<2
 scipy
 Pillow
 cython
